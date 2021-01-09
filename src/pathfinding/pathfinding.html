@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Movement test</title>
+		<style>
+			body { margin: 0; }
+			canvas { display: block; }
+			#gamescreen {
+				height: 768px;
+				width: 1064px;
+				position: center-left;
+				background-color: brown;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="gamescreen"></div>
+		<script src="three.js"></script>
+		<script src="GLTFLoader.js"></script>
+		<script type="text/javascript" src="pathfinding-browser.min.js"></script>
+		<script>
+			//"use strict";
+			//FUNC: set up environment
+			var Setup = false;
+			var scene = new THREE.Scene();
+			var container = document.getElementById('gamescreen');
+            var w = container.offsetWidth;
+            var h = container.offsetHeight;
+			var aspect = w/h;
+			var renderer = new THREE.WebGLRenderer();
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(w,h);
+			container.appendChild(renderer.domElement);
+			
+			//FUNC: set up camera
+			var camera = new THREE.PerspectiveCamera(60, aspect, 1, 1000);
+			/*let n = 100; // test camera 2
+			var camera = new THREE.OrthographicCamera(w / - n, w / n, h / n, h / - n, 0.01, 100 ); // test camera 2
+			camera.position.set(0, 10, 0);  // test camera 2*/
+			var d = 4;
+			//camera.zoom = 1;
+			camera.position.set(d, d, d); // real camera
+			//camera.position.set(0, 13, 0); // test camera
+			
+			camera.lookAt(scene.position);
+			camera.updateProjectionMatrix();
+
+			// FUNC: set up lights
+			var AmbiLight = new THREE.AmbientLight( 0x404040 , 3); // soft white light
+            scene.add( AmbiLight );
+            var directionalLight = new THREE.DirectionalLight( 0xffffff, 0.2);
+            directionalLight.position.set(0,2*d,0);
+            scene.add( directionalLight );
+        
+
+			
+			// CLASS: Player
+			class Player {
+				constructor(appearance) {
+					this.axis = new THREE.Object3D();
+					this.appearance = appearance; // for when chars have appearances
+					this.axis.add(this.appearance);
+					this.path = null;
+					//this.currentNode = 0;
+					this.arrivalDist = 1;
+					this.maxSpeed = 10;
+					this.velocity = new THREE.Vector3(0,0,0);
+					//this.facing = 0;
+					
+				}
+				move(delta) {
+					return 0;
+				}
+				changeAppearance(newmesh) {
+					this.axis.remove(this.appearance);
+					this.appearance = newmesh;
+					this.axis.add(this.appearance);
+				}
+				
+				do_pathfollowing(deltaT) {
+					if (this.path != null && this.path.length > 0) {
+						//console.log("Path here\n", this.path);
+						let position = new THREE.Vector3();
+						this.axis.getWorldPosition(position);
+						
+						let pos = new THREE.Vector3();
+						pos.copy(this.path[0]); // currently contains the target pos
+						//console.log(pos, this.path);
+						
+						//this.appearance.lookAt(pos); not great because feels jagged
+						
+						let dist = pos.distanceToSquared( position );
+						//console.log( dist);
+						
+						if ( dist < this.arrivalDist) {
+							if (this.path.length > 1) {
+								//this.appearance.geometry.lookAt(this.path[1]);
+								this.path.shift();
+							//pos = this.path[0];
+							//console.log(pos, this.path);
+							} else {
+								if (dist < this.arrivalDist * deltaT) {
+									this.axis.position.set(pos.x, pos.y, pos.z);
+									this.path.shift();
+									return;
+								}
+							}
+						}
+						
+						// get the steered value
+						pos.sub(position);
+						pos.normalize();
+						pos.multiplyScalar(deltaT * this.maxSpeed); // desired velocity
+						//console.log(deltaT * this.maxSpeed, pos);
+						
+						pos.sub(this.velocity); // steering value
+						//console.log("steering:", pos);
+						
+						this.velocity.add(pos);
+						//console.log(this.velocity);
+						this.velocity.clampLength(0, deltaT * this.maxSpeed); // new velocity
+						//console.log("Velocity:", this.velocity);
+						
+						pos = position;
+						pos.add(this.velocity);
+						//console.log("final", pos);
+						
+						//this.appearance.lookAt(position);
+						this.axis.position.set(pos.x, pos.y, pos.z);
+						this.appearance.lookAt(position.add(this.velocity)); // bit jagged but good
+						
+						
+					
+						//var q = new THREE.Quaternion();
+						//q.setFromUnitVectors(oldvelocity.normalize(), this.velocity.normalize());
+						//q.setFromUnitVectors(this.velocity.normalize(),oldvelocity.normalize());
+						//oldvelocity.copy(this.axis.position);
+						//pos.copy(this.path[1]);
+						//q.setFromUnitVectors(oldvelocity, pos);
+						//this.velocity.normalize();
+						//q.setFromAxisAngle(oldvelocity + this.velocity, 0); 
+						//console.log(oldvelocity, this.velocity, q);
+						//this.appearance.applyQuaternion(q);
+						
+						//this.appearance.lookAt(0,0,0);
+						//this.appearance.lookAt(this.path[this.path.length-1]);
+						
+						//var matrix = new THREE.Matrix4();
+						//matrix.extractRotation( this.appearance.matrix );
+						//var direction = new THREE.Vector3( 0, 0, 1 );
+						//direction.applyMatrix4(matrix);
+						//this.appearance.setRotationFromMatrix(matrix);
+						//this.appearance.rotateOnWorldAxis(direction, 5);
+					
+						
+						//this.appearance.geometry.lookAt(this.path[0]);
+						
+					
+					}
+				}
+			}
+			
+			// CLASS: MouseManager
+			class MouseManager {
+				constructor() {
+					// FUNC: Set up player
+					var sph = new THREE.SphereGeometry(0.5, 8, 6);
+					var mat = new THREE.MeshPhongMaterial( {color: 0x006400});
+					this.player = new Player(new THREE.Mesh( sph, mat ));
+					
+					this.floorgrid = null; //set up when it's loaded
+					this.phelper = null;
+				}
+				
+				newPlayerPath(click) {
+					var startvec = new THREE.Vector3();
+					this.player.axis.getWorldPosition(startvec);
+					
+					var endvec = mousetoworld(click.clientX, click.clientY);
+					
+					var p = this.floorgrid.getPath(startvec, endvec);
+					//console.log(p);
+					if (p.length != 0) {
+						// the thetastar succeeded.
+						p.pop(); // might cause slight corner-cutting but avoids jags.
+						p.push(endvec);
+						p.shift(); // might cause slight corner-cutting but avoids jags.
+						//p.unshift(startvec);
+						
+						if (this.phelper != null) {
+							this.phelper.display(p);
+							console.log(p);
+							this.player.path = p;
+						}
+					}
+					
+				}
+			
+			};
+			var manager = new MouseManager();
+			
+
+			// CLASS: PathingHelper
+			// assumes PathingGrid size can't be changed
+			// based on code from GridHelper
+			class PathingHelper extends THREE.LineSegments {
+				constructor(xsize = 10, zsize = 10, divisions = 10, gridweights=null, colour=0x444444) {
+					// Create the box-grid.
+					const xstep = xsize / divisions;
+					const zstep = zsize / divisions;
+					const halfX = xsize / 2;
+					const halfZ = zsize / 2;
+					const yh = 0.1;
+					
+					const vertices = [];
+					
+					for (let i = 0, j = 0, currentx = -halfX, currentz = -halfZ; i <= divisions; i++, currentx+= xstep, currentz += zstep) {
+					
+						// push, as sets of three numbers:
+						// two z-parallel points
+						vertices.push(- halfX, yh, currentz, halfX, yh, currentz);
+						// two x-parallel points
+						vertices.push(currentx, yh, -halfZ, currentx, yh, halfZ);
+						
+					}
+					
+					const geometry = new THREE.BufferGeometry();
+					geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( vertices, 3 ) );
+					const material = new THREE.LineBasicMaterial( { color: colour });
+
+					super( geometry, material );
+
+					this.type = 'PathingHelper';
+					
+					this.flags = [];
+					//this.addPoint(2,2);
+					//this.addPoint(2,1);
+					//this.removePoint(0);
+					//this.clear_flags();
+					
+					
+					// Highlight impassable cells
+					if (gridweights != null) {
+						// we have weights
+						if (gridweights.length != divisions) {
+							console.log("Wrong length gridweights array\n");
+							return;
+						}
+						const crossvertices = [];
+						for (let i = 0; i < divisions; i++) {
+							if (gridweights[i].length != divisions) {
+								console.log("Wrong length gridweights array\n");
+								return;
+							}
+							for (let j = 0; j < divisions; j++) {
+								if (gridweights[j][i] == NodeStateEnum.nBlocked) {
+									crossvertices.push(- halfX + i*xstep, yh, - halfZ + (j+1)*zstep, - halfX + (i+1)*xstep, yh, - halfZ + j*zstep);
+								}
+							}
+						}
+						//console.log(crossvertices);
+						const geom2 = new THREE.BufferGeometry();
+						geom2.setAttribute( 'position', new THREE.Float32BufferAttribute( crossvertices , 3 ) );
+						const mat2 = new THREE.LineBasicMaterial( { color: 0xff0033 });
+
+						const crosses = new THREE.LineSegments(geom2, mat2);
+						scene.add(crosses);
+					}
+					
+				}
+				
+				addPoint(x, z) {
+					let geom = new THREE.SphereBufferGeometry(0.1,8,6);
+					let mater = new THREE.MeshPhongMaterial({color: 0x44ffff});
+					this.flags.push(new THREE.Mesh(geom, mater));
+					scene.add(this.flags[this.flags.length - 1]);
+					this.flags[this.flags.length - 1].position.set(x, 0, z);
+				}
+				
+				removePoint(index) {
+					let removed = this.flags.splice(index, 1);
+					scene.remove(removed[0]);
+				}
+				
+				clear_flags() {
+					let n_pts = this.flags.length;
+					for (let i = 0; i < n_pts; i++) {
+						this.removePoint(0);
+					}
+				}
+				
+				display(path) {
+					// path should be an array of Vector3s
+					this.clear_flags();
+					
+					for (let i = 0; i < path.length; i++) {
+						this.addPoint(path[i].x, path[i].z);
+					}
+					
+					
+				}
+			}
+			
+			
+			// CLASS: Grid
+			const NodeStateEnum = Object.freeze({nOpen:0, nFull:2, nBlocked:1});
+			class PathingGrid {
+				constructor(xlimits, zlimits, divisions) {
+					this.xlimits = xlimits;
+					this.zlimits = zlimits;
+					// divisions is the number of cells of width and height to divide this plane into 
+					this.cellxlen = (this.xlimits[1] - this.xlimits[0])/divisions; //maybe force this to be a whole number somehow?
+					this.cellzlen = (this.zlimits[1] - this.zlimits[0])/divisions;
+					this.sides = divisions;
+					
+					var minpoint = [this.xlimits[0], this.zlimits[0]]; //start at actual min
+					var s = [];
+					var ss = [];
+					for (var i = 0; i < divisions; i++) {
+						for (var j = 0; j < divisions; j++) {
+							s.push(NodeStateEnum.nOpen);
+						}
+						ss.push(s);
+						s = [];
+						//minpoint = [minpoint[0] + cellxlen, this.zlimits[0]];
+					}
+					//this.nodes = new PF.Grid(ss);
+					this.nodes = new PF.Grid(divisions, divisions);
+					this.nodearray = ss;
+					console.log(this.nodes, this.nodearray);
+					this.finder = new PF.AStarFinder({
+										allowDiagonal: true,
+										dontCrossCorners: true,
+										heuristic: PF.Heuristic.manhattan
+									});
+					
+					/*this.xmids = [];
+					this.xmids.push(this.xlimits[0] + 0.5*this.cellxlen);
+					this.zmids = [];
+					this.zmids.push(this.zlimits[0] + 0.5*this.cellzlen);
+					for (var d = 1; d < divisions; d++) {
+						this.xmids.push( this.xmids[d-1] + this.cellxlen );
+						this.zmids.push( this.zmids[d-1] + this.cellzlen );
+					}*/
+					console.log(this.xlimits, this.zlimits, this.cellxlen, this.cellzlen);
+				};
+				_findAxisOverlap(minmax, limits, celllen) {
+					var dmin = Math.floor( (minmax[0] - limits[0])/celllen );
+					var dmax = Math.ceil( (minmax[1] - limits[0])/celllen );
+					return [dmin, dmax];
+					
+					//console.log(dmin, dmax);
+				};
+				
+				switchOverlapCells(xlims, zlims, tostate) {
+					var xindices = this._findAxisOverlap(xlims, this.xlimits, this.cellxlen );
+					var zindices = this._findAxisOverlap(zlims, this.zlimits, this.cellzlen );
+					//console.log(this.cellxlen, this.cellzlen, xindices, zindices);
+					
+					if (xindices.length === 0 || zindices.length === 0) {
+						console.log("empty");
+						return null;
+					}
+					
+					let walkable = (tostate == NodeStateEnum.nOpen) ? true : false;
+					//console.log(tostate, walkable);
+					
+					for (var i = xindices[0]; i < xindices[1]; i++) {
+						for (var j = zindices[0]; j < zindices[1]; j++) {
+							//this.nodearray[i][j] = tostate;
+							
+							this.nodes.setWalkableAt(i, j, walkable);
+							this.nodearray[j][i] = tostate;
+						};
+					};
+					//this.nodes = new Graph(this.nodearray);
+					//this.nodes = new PF.Grid(this.nodearray);
+
+				};
+				
+				getPath(startpos, endpos) {
+					// get the path
+					let startcell = this._convertVectortoCell(startpos);
+					let endcell = this.clampClick(endpos, startpos);
+					//console.log(startcell, endcell);
+					try {
+						let gridbackup = this.nodes.clone();
+						let p1 = this.finder.findPath(startcell[0], startcell[1], endcell[0], endcell[1], gridbackup);
+						let pathcells = PF.Util.smoothenPath(gridbackup, p1); //@use this when not displaying.
+						//let pathcells = p1;
+						//console.log(pathcells);
+						//var pathcells = astar.search( this.nodes, startcell, endcell);
+						
+						// return the path as array of Vector3s
+						var pathpos = [];
+						for (var i = 0; i < pathcells.length; i++) {
+							endpos = this._convertCelltoVector( pathcells[i] );
+							pathpos.push(endpos);
+						}
+						//console.log(pathpos);
+						return pathpos;
+					} catch (TypeError) {
+						return [];
+					}
+				
+				}
+				
+				clampClick(endpos, playerpos) {
+					// check it's not: outside of the grid square
+					/*if (endcell[0] < 0) {
+						endcell[0] = 0;
+					} else if (endcell[0] > this.sides) {
+						endcell[0] = this.sides - 1;
+					}
+					if (endcell[1] < 0) {
+						endcell[1] = 0;
+					} else if (endcell[1] > this.sides) {
+						endcell[1] = this.sides - 1;
+					}*/
+					/*let endcell = this._convertVectortoCell(endpos);
+					if (this.nodes.isWalkableAt(endcell[0], endcell[1])) {
+						return endcell;
+					}
+					playerpos.sub(endpos);
+					let maxlen = playerpos.length();
+					
+					while (!this.nodes.isWalkableAt(endcell[0], endcell[1])) {
+						maxlen = maxlen - this.cellxlen;
+						endcell = this._convertVectortoCell(playerpos.setLength(maxlen));
+						//endcell = this._convertVectortoCell(playerpos.lerp(endpos, 0.9));
+						console.log(endcell);
+					}
+					
+					return endcell;*/
+					
+					// Breadth first search method
+					// for the moment checks all twice, could add a seen tracker to save some time.
+					let endcell = this._convertVectortoCell(endpos);
+					if (this.nodes.isWalkableAt(endcell[0], endcell[1])) {
+						return endcell;
+					}
+					
+					/*let openList = [];
+					openList.push(endcell);
+					let node, count = 0;
+					console.log("inputs", endcell, openList);
+					
+					while (openList.length) {
+						node = openList.shift();
+						
+						if (this.nodes.isWalkableAt(node[0], node[1])) {
+							console.log(node);
+							return node;
+						}
+						
+						openList.push([node[0] - 1, node[1] - 1]);
+						openList.push([node[0] - 1, node[1]]);
+						openList.push([node[0] - 1, node[1] + 1]);
+						openList.push([node[0], node[1] - 1]);
+						openList.push([node[0], node[1] + 1]);
+						openList.push([node[0] + 1, node[1] - 1]);
+						openList.push([node[0] + 1, node[1]]);
+						openList.push([node[0] + 1, node[1] + 1]);
+						
+						count ++;
+					}
+					
+					return []; // failed*/
+				
+				}
+				
+				_convertVectortoCell(vect) {
+					var x = Math.round(( vect.x - this.xlimits[0] ) / this.cellxlen);
+					var z = Math.round(( vect.z - this.zlimits[0] ) / this.cellzlen);
+					//console.log(x,z);
+					//return this.nodes.grid[x][z];
+					return [x,z];
+				};
+				_convertCelltoVector(cell) {
+					let vec = new THREE.Vector3();
+					//console.log(typeof cell, cell);
+					vec.x = this.xlimits[0] + cell[0]*this.cellxlen + 0.5*this.cellxlen;
+					vec.z = this.zlimits[0] + cell[1]*this.cellzlen + 0.5*this.cellzlen;
+					return vec;
+				};
+				
+			};
+			
+			function gridify(plane, obstacles, squareCount) {
+				// FUNC: constructs the pathfinding grid. Called in the loader
+				// plane is the walkable floor area, obstacles are obstacle objects, square count chooses the density of outcomes
+				
+				plane.geometry.computeBoundingBox();
+				var boundbox = plane.geometry.boundingBox;
+				var flatbox = [[boundbox.min.x, boundbox.max.x], [boundbox.min.z, boundbox.max.z]];  // (removes y components)
+				
+				var griddy = new PathingGrid(flatbox[0], flatbox[1], squareCount);
+				
+				//cancel obstacles
+				for (var i = 0; i < obstacles.length; i++) {
+					obstacles[i].geometry.computeBoundingBox();
+					boundbox = obstacles[i].geometry.boundingBox;
+					//console.log(boundbox);
+					flatbox = [[boundbox.min.x, boundbox.max.x], [boundbox.min.z, boundbox.max.z]];
+					griddy.switchOverlapCells(flatbox[0], flatbox[1], NodeStateEnum.nBlocked);
+				}
+				return griddy;
+			};
+			
+			// FUNC: Load from file
+			let loader = new THREE.GLTFLoader();
+			loader.load( 'trial-bg-parts.glb', function ( gltf ) {				
+				// Add in the scene.
+				scene.add(gltf.scene);
+				var env = gltf.scene.children.filter(obj => obj.name === 'floor')[0];
+				var blocks = gltf.scene.children.filter(obj => obj.name.includes('wall'));
+				
+				// Get the pathfinding grid
+				manager.floorgrid = gridify(env, blocks, 30);
+				const xlen = manager.floorgrid.xlimits[1] - manager.floorgrid.xlimits[0];
+				const zlen = manager.floorgrid.zlimits[1] - manager.floorgrid.zlimits[0];
+				manager.phelper = new PathingHelper(xlen, zlen, divisions=manager.floorgrid.nodearray.length,gridweights=manager.floorgrid.nodearray);
+				scene.add(manager.phelper);
+				//  Give player their proper model.
+				manager.player.changeAppearance(gltf.scene.children[0]);
+				scene.add(manager.player.axis);
+				manager.player.axis.position.set(0,0,0);
+				manager.player.axis.add(camera);
+				manager.player.arrivalDist = manager.floorgrid.cellxlen;
+				//sph.dispose();
+				//mat.dispose();
+				
+            });
+			
+			//var gridHelper = new THREE.GridHelper(15, 15);
+			//scene.add(gridHelper);
+			
+			//mousepointer;
+			var mousegeo = new THREE.SphereGeometry(0.1,8,6);
+			var mousemat = new THREE.MeshPhongMaterial( {color: 0xffaaff});
+            var mousesph = new THREE.Mesh( mousegeo, mousemat );
+			scene.add(mousesph);
+			mousesph.position.set(0,0,0);
+			
+			function mousetoworld (mx, my) {
+				var mxnorm = (mx / container.offsetWidth) * 2 - 1;
+				var mynorm = -(my / container.offsetHeight) *2 + 1;
+
+				var groundpos = new THREE.Vector3(mxnorm, mynorm, 1); // will store ground pos at end
+				camera.updateMatrixWorld(); // global perspective camera
+				groundpos.unproject(camera).normalize();
+				var len = camera.position.y / groundpos.y; //find scale that will make sum of camera pos vect and this angled vect flat to ground
+				groundpos.multiplyScalar(len);
+				//groundpos.sub(camera.position);
+				groundpos.sub(camera.getWorldPosition(new THREE.Vector3()));
+				
+				mousesph.position.set(-1*groundpos.x, 0, -1*groundpos.z); //dunno why coords need to be inverted, but it works so I'll take it.
+				
+				//return [-1*groundpos.x, -1*groundpos.z];
+				var coords = new THREE.Vector3( -1 * groundpos.x, 0, -1 * groundpos.z);
+				return coords;
+				
+            }
+
+            function addMouseHandler(canvas) {
+                canvas.addEventListener('mousemove', function (e) {
+                    onMouseMove(e);
+                    }, false);
+                canvas.addEventListener('mousedown', function (e) {onMouseDown(e) }, false);
+                canvas.addEventListener('mouseup', function (e) {onMouseUp(e) }, false);
+				canvas.addEventListener('keyup', function (e) {onKeyUp(e) }, false);
+            }
+            addMouseHandler(window);
+            
+            var mouseclick = false;
+            
+            function onMouseDown(evt) {
+				if (evt.target==renderer.domElement) {
+					mouseclick = true;
+					charmove(evt)
+				}
+            }
+			
+            function onMouseUp(evt) {
+                mouseclick = false;
+            }
+			
+            function onMouseMove(evt) {
+                evt.preventDefault();
+                if (mouseclick && evt.target==renderer.domElement) {
+                    charmove(evt)
+                }
+            }
+			
+			function onKeyUp(evt) {
+				if (evt.code === 'Space' || evt.which === 32) {
+					console.log("Space");
+					manager.player.do_pathfollowing(0.01);
+				}
+			}
+			
+            function charmove(evt) {
+				manager.newPlayerPath(evt);
+				//manager.player.do_pathfollowing(0.01);
+				//player.newHeading(evt, grid);
+            }
+			
+			const perfectFrameTime = 1000/60; //https://stackoverflow.com/questions/13996267/loop-forever-and-provide-delta-time
+			let lastTimestamp = 0;
+			let deltaTime = 0;
+			
+			function update(timestamp) {
+				deltaTime = (timestamp - lastTimestamp) / perfectFrameTime;
+				lastTimestamp = timestamp;
+			}
+
+
+            function animate() {
+				update(Date.now());
+				manager.player.do_pathfollowing(deltaTime / 100);
+				requestAnimationFrame( animate );
+				renderer.render( scene, camera );
+            }
+			
+
+            animate();
+            
+
+			
+		</script>
+	</body>
+</html>
