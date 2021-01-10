@@ -171,7 +171,10 @@ class PlayerCombatant {
 	constructor(appearance, floor=null) {
 		// character is a 3D model located on an invisible axis object
 		this.axis = new THREE.Object3D();
+		this.axis.onBeforeRender = this.extrapolate;
+		this.axis.onAfterRender = this.de_extrapolate;
 		this.appearance = appearance;
+		this.position = new THREE.Vector3();
 		this.axis.add(this.appearance);
 		scene.add(this.axis);
 		this.axis.position.set(0,0,0);
@@ -181,8 +184,8 @@ class PlayerCombatant {
 		this.floor = floor;
 		
 		this.path = null; // array of vectors that make up the path
-		this.arrivalDist = 1; //the close-enough distance for reaching each node on the path
-		this.maxSpeed = 10;
+		this.maxSpeed = 0.005 * MS_PER_UPDATE;
+		this.arrivalDist = this.maxSpeed * this.maxSpeed; //the close-enough distance for reaching each node on the path
 		this.velocity = new THREE.Vector3(0,0,0);
 	}
 	
@@ -204,13 +207,15 @@ class PlayerCombatant {
 	
 	updateFloor(f) {
 		this.floor = f;
-		this.arrivalDist = f.cellxlen / 2;
+		this.arrivalDist = Math.min(f.cellxlen / 2, this.maxSpeed * this.maxSpeed);
 	}
 	
-	do_pathfollowing(deltaT) {
+	do_pathfollowing() {
 		if (this.path != null && this.path.length > 0) {
-			let position = new THREE.Vector3();
-			this.axis.getWorldPosition(position);
+			//let position = new THREE.Vector3();
+			//this.axis.getWorldPosition(position);
+			let position = this.position.clone();
+			
 			
 			let steer = new THREE.Vector3();
 			steer.copy(this.path[0]); // currently contains the target pos
@@ -222,7 +227,7 @@ class PlayerCombatant {
 				if (this.path.length > 1) {
 					this.path.shift();
 				} else {
-					if (dist < this.arrivalDist * deltaT) {
+					if (dist < this.velocity.length()) {
 						this.axis.position.set(steer.x, steer.y, steer.z);
 						this.path.shift();
 						return;
@@ -234,20 +239,32 @@ class PlayerCombatant {
 			steer.sub(position);
 			// cut it to length to match the desired velocity
 			steer.normalize();
-			steer.multiplyScalar(deltaT * this.maxSpeed);
+			steer.multiplyScalar(this.maxSpeed);
 			// add the effect of current velocity/inertia
 			steer.sub(this.velocity);
 			
 			// update our overall current velocity
 			this.velocity.add(steer);
-			this.velocity.clampLength(0, deltaT * this.maxSpeed);
+			this.velocity.clampLength(0, this.maxSpeed);
 			
 			// get our final position. Set our position and angling to match
 			let newpos = position;
 			newpos.add(this.velocity);
 			
+			this.position.set(newpos.x, newpos.y, newpos.z);
 			this.axis.position.set(newpos.x, newpos.y, newpos.z);
 			this.appearance.lookAt(position.add(this.velocity));
+		} else {
+			this.velocity.set(0,0,0);
+		}
+	}
+	
+	extrapolate(lagfraction) {
+		if (this.velocity.length() > 0) {
+			const movement = this.velocity.clone();
+			movement.multiplyScalar(lagfraction);
+			this.axis.position.add(movement); 	
+			//@add a line to add appearance extrapolating?
 		}
 	}
 };
@@ -437,22 +454,30 @@ function setup() {
 	});
 }
 
+const MS_PER_UPDATE = 1000/90; // 60 updates per sec
+let lastTimestamp = 0;
+let lag = 0; // lag saves the amount of time we haven't run update() on.
+
 function animate() {
-	update(Date.now());
-	playerInputController.player.do_pathfollowing(deltaTime / 200 );
+	// Find how much time has passed
+	const currentTime = Date.now();
+	lag += (currentTime - lastTimestamp);
+	lastTimestamp = currentTime;
+	
+	// Do the updates in fixed time steops of MS_PER_UPDATE
+	while (lag >= MS_PER_UPDATE) {
+		update();
+		lag -= MS_PER_UPDATE;
+	}
+	
 	requestAnimationFrame( animate );
 	renderer.render( scene, camera );
 }
 
-
-const perfectFrameTime = 1000/60; //https://stackoverflow.com/questions/13996267/loop-forever-and-provide-delta-time
-let lastTimestamp = 0;
-let deltaTime = 0;
-
-function update(timestamp) {
-	deltaTime = (timestamp - lastTimestamp) / perfectFrameTime;
-	lastTimestamp = timestamp;
+function update() {
+	playerInputController.player.do_pathfollowing();
 }
 
 setup();
+lastTimestamp = Date.now();
 animate();
