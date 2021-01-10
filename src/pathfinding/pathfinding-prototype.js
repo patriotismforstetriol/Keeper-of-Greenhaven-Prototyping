@@ -1,19 +1,13 @@
 "use strict";
 
+/** Class to handle clicks that relate to the Player */
 class PlayerInput {
-	paused = false;
-	mouseclick = false;
-	player = null;
-	helper = null;
+	paused = false; // if paused is true, then clicks are ignored.
+	mouseclick = false; // true if the mouse button is being held down
+	player = null; // the player that this instance passes its click events to
+	helper = null; // optional: helper to display in-world click position.
 	
-	/*set player(p) {
-		this.player = p;
-	}*/
-					
-	/*set pause(bool) {
-		this.paused = bool;
-	}*/
-	
+	/** Handler for a click event that the player should deal with.*/
 	newClick(evt) {
 		if (!this.paused) {
 			const worldpos = PlayerInput.mousetoworld(evt.x, evt.y);
@@ -25,22 +19,25 @@ class PlayerInput {
 		}
 	}
 	
+	/** Function to convert screen x,y to world x,z*/
 	static mousetoworld (mx, my) {
-		let mxnorm = (mx / container.offsetWidth) * 2 - 1;
-		let mynorm = -(my / container.offsetHeight) * 2 + 1;
+		// get the % across the screen where the click falls
+		const mxnorm = (mx / container.offsetWidth) * 2 - 1;
+		const mynorm = -(my / container.offsetHeight) * 2 + 1;
 
-		let groundpos = new THREE.Vector3(mxnorm, mynorm, 1);
-		camera.updateMatrixWorld(); // global perspective camera
+		const groundpos = new THREE.Vector3(mxnorm, mynorm, 1);
+		camera.updateMatrixWorld(); // uses global var
 		groundpos.unproject(camera).normalize();
 		//find scale that will make sum of camera pos vect and this angled vect flat to ground
 		groundpos.multiplyScalar(camera.position.y / groundpos.y);
-		let pos = new THREE.Vector3();
+		const pos = new THREE.Vector3();
 		groundpos.sub(camera.getWorldPosition(pos));
 		
 		pos.set(-groundpos.x, 0, -groundpos.z);
 		return pos;
 	}
 	
+	/** Mouse event handler for when mouse is clicked. */
 	onMouseDown(evt) {
 		if (evt.target==renderer.domElement) {
 			this.mouseclick = true;
@@ -48,12 +45,14 @@ class PlayerInput {
 		}
 	}
 
+	/** Mouse event handler for when mouse is unclicked.*/
 	onMouseUp(evt) {
 		this.mouseclick = false;
 	}
 
+	/** Mouse event handler for the event where the mouse is being dragged.*/
 	onMouseMove(evt) {
-		evt.preventDefault();
+		//evt.preventDefault();
 		if (this.mouseclick && evt.target==renderer.domElement) {
 			this.newClick(evt);
 		}
@@ -61,7 +60,17 @@ class PlayerInput {
 };
 
 const NodeStateEnum = Object.freeze({nOpen:0, nFull:2, nBlocked:1});
+/** Class to handle the non-visible features of terrain on which Combatants can move.*/
 class PathTerrain {
+	/** Constructor for a fully-walkable terrain of a given size.
+	 * @see constructFromTerrain() for a different option
+	 *
+	 * @param xlimits an array of the in-world x max and in-world x min values of the
+	 * terrain.
+	 * @param zlimits an array of the in-world z max and in-world z min values of the
+	 * terrain.
+	 * @param divisions the number of slices/cells. Same in both the x and z directions.
+	 */
 	constructor(xlimits, zlimits, divisions) {
 		this.xlimits = xlimits;
 		this.zlimits = zlimits;
@@ -80,6 +89,16 @@ class PathTerrain {
 
 	};
 	
+	/** Find the minimum and maximum cell number that overlap with the parameter.
+	*
+	* Returns the range of cell numbers that the range minmax would at least partly cover. 
+	*
+	* Can be used for either x or z axis.
+	*
+	* @param minmax array of 2 in-world coordinates (min, then max).
+	* @param limits this.xlimits or this.zlimits
+	* @param celllen this.cellxlen or this.cellzlen
+	*/
 	_findAxisOverlap(minmax, limits, celllen) {
 		var dmin = Math.floor( (minmax[0] - limits[0])/celllen );
 		var dmax = Math.ceil( (minmax[1] - limits[0])/celllen );
@@ -87,6 +106,13 @@ class PathTerrain {
 
 	};
 	
+	/** Set the walkability of each cell that is at least partly covered by the 
+	* square made by xlims[0], xlims[1], zlims[0] and zlims[1] to tostate.
+	*
+	* @param xlims array of 2 in-world coordinates (min, then max).
+	* @param zlims array of 2 in-world coordinates (min, then max).
+	* @param tostate a NodeStateEnum saying what to switch the cells to.
+	*/
 	switchOverlapCells(xlims, zlims, tostate) {
 		var xindices = this._findAxisOverlap(xlims, this.xlimits, this.cellxlen );
 		var zindices = this._findAxisOverlap(zlims, this.zlimits, this.cellzlen );
@@ -106,6 +132,11 @@ class PathTerrain {
 
 	};
 	
+	/** Do pathfinding from frompos to topos. Return it as an array of in-world
+	 * vectors. 
+	 *
+	 * frompos and topos should be Vector3s
+	 */
 	getPath(frompos, topos) {
 		// get the path
 		let startcell = this._convertVectortoCell(frompos);
@@ -135,12 +166,14 @@ class PathTerrain {
 		}
 	}
 	
+	/** Converts a Vector3 to an [x,z] array representing a cell in the pathfinding grid.*/
 	_convertVectortoCell(vect) {
 		var x = Math.round(( vect.x - this.xlimits[0] ) / this.cellxlen);
 		var z = Math.round(( vect.z - this.zlimits[0] ) / this.cellzlen);
 		return [x,z];
 	}
 	
+	/** Converts an [x,z] array representing a cell in the pathfinding grid to a Vector3.*/
 	_convertCelltoVector(cell) {
 		let vec = new THREE.Vector3();
 		vec.x = this.xlimits[0] + cell[0]*this.cellxlen + 0.5*this.cellxlen;
@@ -148,6 +181,15 @@ class PathTerrain {
 		return vec;
 	}
 	
+	/** Constructor for a terrain based on a set of loaded 3D models.
+	 *
+	 * @param floor the singular model spanning all walkable areas. Its bounding box
+	 * will be used as the size of the grid.
+	 * @param walls an array of models containing items that players should not be able
+	 * to walk through. Cells overlapping their bounding boxes will be made impassable.
+	 * @param divisions the number of slices/cells. Same in both the x and z directions.
+	 * @returns a new PathTerrain instance created from these models
+	 */
 	static gridify(floor, walls, divisions) {
 		// FUNC: constructs the pathfinding grid from 3D model objects
 		floor.geometry.computeBoundingBox();
@@ -167,20 +209,27 @@ class PathTerrain {
 	
 };
 
+/** Class representing the player. */
 class PlayerCombatant {
+	/** Construct a player. 
+	 *
+	 * @param appearance the starting Object3D representing the player.
+	 * @param floor the PathTerrain the player can travel on. If not set here,
+	 * need to @see updateFloor() before being able to deal with clicks.
+	 */
 	constructor(appearance, floor=null) {
 		// character is a 3D model located on an invisible axis object
+		// this is so that character can rotate without camera rotating too
 		this.axis = new THREE.Object3D();
 		this.axis.onBeforeRender = this.extrapolate;
-		this.axis.onAfterRender = this.de_extrapolate;
 		this.appearance = appearance;
 		this.position = new THREE.Vector3();
 		this.axis.add(this.appearance);
 		scene.add(this.axis);
 		this.axis.position.set(0,0,0);
-		this.axis.add(camera);
+		this.axis.add(camera); // make camera stay still relative to axis.
 		
-		// what grid are we currently travelling on/using?
+		// what grid are we currently travelling on/using?:
 		this.floor = floor;
 		
 		this.path = null; // array of vectors that make up the path
@@ -189,6 +238,8 @@ class PlayerCombatant {
 		this.velocity = new THREE.Vector3(0,0,0);
 	}
 	
+	/** Get a new path based on a new clicked position on the map. 
+	* Needs to have this.floor set. */
 	dealWithClick(clicked_pos) {
 		const my_pos = new THREE.Vector3();
 		this.axis.getWorldPosition(my_pos);
@@ -199,23 +250,24 @@ class PlayerCombatant {
 		}
 	}
 	
+	/** Swap out the player's 3D model for a new one.*/
 	updateAppearance(newmesh) {
 		this.axis.remove(this.appearance);
 		this.appearance = newmesh;
 		this.axis.add(this.appearance);
 	}
 	
+	/** Swap out the players PathTerrain for a new one.*/
 	updateFloor(f) {
 		this.floor = f;
 		this.arrivalDist = Math.min(f.cellxlen / 2, this.maxSpeed * this.maxSpeed);
 	}
 	
+	/** At timesteps of MS_PER_UPDATE, move along the path using path following behaviour.
+	* https://gamedevelopment.tutsplus.com/tutorials/understanding-steering-behaviors-path-following--gamedev-8769 */
 	do_pathfollowing() {
 		if (this.path != null && this.path.length > 0) {
-			//let position = new THREE.Vector3();
-			//this.axis.getWorldPosition(position);
 			let position = this.position.clone();
-			
 			
 			let steer = new THREE.Vector3();
 			steer.copy(this.path[0]); // currently contains the target pos
@@ -259,6 +311,9 @@ class PlayerCombatant {
 		}
 	}
 	
+	/** Move the player a little further along their velocity vector, when we need 
+	* to extrapolate because the current render time is a bit beyond the current
+	* update status. */
 	extrapolate(lagfraction) {
 		if (this.velocity.length() > 0) {
 			const movement = this.velocity.clone();
@@ -269,7 +324,8 @@ class PlayerCombatant {
 	}
 };
 
-// Click in-world location helper.
+/** Class representing the position of the last click in-world as a small sphere.
+ Set the .helper of PlayerInput to this to have it show up.*/
 class InputHelper {
 	constructor() {
 		this.mousegeo = new THREE.SphereGeometry(0.1,8,6);
@@ -283,10 +339,24 @@ class InputHelper {
 	}
 };
 
-/**
+/** Class visualising a PathTerrain instance. Set .helper of a PathTerrain to one
+ * of these to have it show up.
  *
+ * Displays:
+ * 1. A grey grid showing the cells in the PathTerrain's pathfinding grid.
+ * 2. Red crosses across non-walkable cells in the PathTerrain's pathfinding grid.
+ * 3. Blue spheres representing the nodes of the lates path the PathTerrain generated.
  */
 class PathTerrainHelper {
+	/** Basic constructor for this helper. @see constructFromTerrain() for 
+	* an alternative.
+	* 
+	* @param xsize the length in the x-direction of the PathTerrain.
+	* @param zsize the length in the z-direction of the PathTerrain.
+	* @param divisions number of cells in each direction
+	* @param cells_walkable a divisions by divisions array contain 
+	* true/false entries for each cell's walkability. 
+	*/
 	constructor(xsize = 10, zsize = 10, divisions = 10, cells_walkable=null) {
 		
 		// Create the grid
@@ -342,6 +412,10 @@ class PathTerrainHelper {
 		
 	}
 	
+	/** Constructor to make the helper belonging to a specific PathTerrain.
+	*
+	* @returns the new PathTerrainHelper
+	*/
 	static constructFromTerrain(terrain) {
 		let passables = Array.from(Array(terrain.divisions), () => new Array(terrain.divisions));
 		for (let i = 0; i < terrain.divisions; i++) {
@@ -357,7 +431,8 @@ class PathTerrainHelper {
 		return helper;
 	}
 	
-	addPoint(x, z) {
+	/** Add an in-world coordinate to the list of blue spheres that display a path.*/
+	_addPoint(x, z) {
 		let geom = new THREE.SphereBufferGeometry(0.1,8,6);
 		let mater = new THREE.MeshPhongMaterial({color: 0x44ffff});
 		this.flags.push(new THREE.Mesh(geom, mater));
@@ -365,33 +440,38 @@ class PathTerrainHelper {
 		this.flags[this.flags.length - 1].position.set(x, 0, z);
 	}
 	
-	removePoint(index) {
+	/** Remove the entry at index from the list of blue spheres that display a path.*/
+	_removePoint(index) {
 		let removed = this.flags.splice(index, 1);
 		scene.remove(removed[0]);
 	}
 	
+	/** Clear the list of blue spheres that display a path.*/
 	clear_flags() {
 		let n_pts = this.flags.length;
 		for (let i = 0; i < n_pts; i++) {
-			this.removePoint(0);
+			this._removePoint(0);
 		}
 	}
 	
+	/** Takes an array of [x,z] in-world coordinates representing a new path to 
+	* display as a set of blue spheres. */
 	display(path) {
 		// path should be an array of Vector3s
 		this.clear_flags();
 		
 		for (let i = 0; i < path.length; i++) {
-			this.addPoint(path[i].x, path[i].z);
+			this._addPoint(path[i].x, path[i].z);
 		}
 		
 	}
 };
 
-
+/* Global vars needed because the animate() function wants to use them.*/
 let camera, scene, renderer, container;
 const playerInputController = new PlayerInput();
 
+/** Function to set-up the prototype.*/
 function setup() {
 	/*FUNC: set up environment*/
 	scene = new THREE.Scene();
@@ -454,10 +534,14 @@ function setup() {
 	});
 }
 
+/* Global vars used by game loop.
+Reference: Fixed update, variable render pattern from: http://gameprogrammingpatterns.com/game-loop.html
+*/
 const MS_PER_UPDATE = 1000/90; // 60 updates per sec
 let lastTimestamp = 0;
 let lag = 0; // lag saves the amount of time we haven't run update() on.
 
+/** Function that runs continually and contains game loop.*/
 function animate() {
 	// Find how much time has passed
 	const currentTime = Date.now();
@@ -474,6 +558,7 @@ function animate() {
 	renderer.render( scene, camera );
 }
 
+/** Function that updates in-world events every MS_PER_UPDATE.*/
 function update() {
 	playerInputController.player.do_pathfollowing();
 }
