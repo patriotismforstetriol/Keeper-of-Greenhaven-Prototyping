@@ -15,6 +15,8 @@ class Runner {
 		let geometry = new THREE.BoxBufferGeometry(0.5, 1.5, 0.5);
 		let material = new THREE.MeshPhongMaterial( {color: 0x00aa33} );
 		this.visual = new THREE.Mesh( geometry, material );
+		//this.visual.onBeforeRender = this.extrapolate;
+		//this.visual.onAfterRender = this.deextrapolate;
 		scene.add( this.visual );
 		this.jumping = false;
 		this.lane = 0; // lanes -1, 0, 1 are valid.
@@ -37,8 +39,8 @@ class Runner {
 	
 	update() {
 		if (this.jumping) {
-			this.visual.position.y += this.yvelocity * 0.04; //0.04 is just a tested factor
-			this.yvelocity += GRAVITY * 0.04;
+			this.visual.position.y += this.yvelocity * 0.004 * MS_PER_UPDATE; //0.004 is just a tested factor
+			this.yvelocity += GRAVITY * 0.003 * MS_PER_UPDATE;
 			
 			if (this.visual.position.y <= 0) {
 				this.visual.position.y = 0;
@@ -52,6 +54,18 @@ class Runner {
 			
 		}
 		
+	}
+	
+	extrapolate(lag) {
+		if (this.jumping) {
+			this.visual.position.y += this.yvelocity * 0.004 * lag; //0.004 is just a tested factor
+		}
+	}
+	
+	deextrapolate(lag) {
+		if (this.jumping) {
+			this.visual.position.y -= this.yvelocity * 0.004 * lag; //0.004 is just a tested factor
+		}
 	}
 	
 }
@@ -108,7 +122,7 @@ class PlatformManager {
 	}
 	
 	update() {
-		//let moveby = 0.005 * MS_PER_UPDATE * this.accel;
+		let moveby = 0.04 * MS_PER_UPDATE * this.accel;
 		for (var i = 0; i < this.rows; i++) {
 			
 			// check here if need to rotate the row
@@ -117,12 +131,12 @@ class PlatformManager {
 				swap = true;
 			}
 			for (var j = 0; j < this.lanes; j++) {
-				this.platforms[i][j].visual.position.z += this.accel;
+				this.platforms[i][j].visual.position.z += moveby;
 				if (swap) {
 					// move to just behind previous tile. previous tile must have been moved already.
 					if (i == 0) {
 						this.platforms[0][j].visual.position.z = 
-							this.platforms[this.rows - 1][j].visual.position.z - PLATFORM_LEN + this.accel; 
+							this.platforms[this.rows - 1][j].visual.position.z - PLATFORM_LEN + moveby; 
 							// have to add movement here because it hasn't been added to pos of last tile yet
 					} else {
 						// push them to the end
@@ -134,6 +148,22 @@ class PlatformManager {
 			}
 		}
 		this.accel += 0.0001; // this is obviously too fast to accelerate but
+	}
+	
+	extrapolate(lag) {
+		for (var i = 0; i < this.rows; i++) {
+			for (var j = 0; j < this.lanes; j++) {
+				this.platforms[i][j].visual.position.z += 0.04 * this.accel * lag;
+			}
+		}
+	}
+	
+	deextrapolate(lag) {
+		for (var i = 0; i < this.rows; i++) {
+			for (var j = 0; j < this.lanes; j++) {
+				this.platforms[i][j].visual.position.z -= 0.04 * this.accel * lag;
+			}
+		}
 	}
 }
 
@@ -244,8 +274,10 @@ function animate() {
 		lag -= MS_PER_UPDATE;
 	}
 	
+	extrapolate(lag);
 	requestAnimationFrame( animate );
 	renderer.render( scene, camera );
+	deextrapolate(lag);
 }
 
 /** Function that updates in-world events every MS_PER_UPDATE.*/
@@ -253,6 +285,20 @@ function update() {
 	if (!paused) {
 		runner.update();
 		platform.update();
+	}
+}
+
+function extrapolate(lag) {
+	if (!paused) {
+		runner.extrapolate(lag);
+		platform.extrapolate(lag);
+	}
+}
+
+function deextrapolate(lag) {
+	if (!paused) {
+		runner.deextrapolate(lag);
+		platform.deextrapolate(lag);
 	}
 }
 
