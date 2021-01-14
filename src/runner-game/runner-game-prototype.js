@@ -10,6 +10,7 @@ The player's y-coord moves to jump.
 
 // Jumping functionality : https://gamedev.stackexchange.com/questions/29617/how-to-make-a-character-jump
 /** Class that represents the player's character in the runner game.*/
+const RunnerStateEnum = Object.freeze({sRun:0, sJump:1, sSlide:2});
 class Runner {
 	constructor() {
 		let geometry = new THREE.BoxBufferGeometry(0.5, 1.5, 0.5);
@@ -18,10 +19,11 @@ class Runner {
 		//this.visual.onBeforeRender = this.extrapolate;
 		//this.visual.onAfterRender = this.deextrapolate;
 		scene.add( this.visual );
-		this.jumping = false;
+		this.state = RunnerStateEnum.sRun;
 		this.lane = 0; // lanes -1, 0, 1 are valid.
 		this.yvelocity = 0;
-		this.willjump = false;
+		this.slidetime = 0;
+		this.nextState = RunnerStateEnum.sRun;
 	}
 	
 	moveLane() {
@@ -29,31 +31,53 @@ class Runner {
 	}
 	
 	startJumping() {
-		if (!this.jumping) {
+		if (this.state == RunnerStateEnum.sRun) {
 			this.yvelocity = 1.3;
-			this.jumping = true;
-		} else if (this.visual.position.y < 0.5) {
-			this.willjump = true;
+			this.state = RunnerStateEnum.sJump;
+			this.nextState = RunnerStateEnum.sRun;
+		} else if ((this.visual.position.y < 0.5 && this.visual.position.y > 0) || this.slidetime > 500) {
+			this.nextState = RunnerStateEnum.sJump;
+		}
+	}
+	
+	startSliding() {
+		if (this.state == RunnerStateEnum.sRun) {
+			this.visual.position.y = -0.5;
+			this.state = RunnerStateEnum.sSlide;
+			this.nextState = RunnerStateEnum.sRun;
+		} else if ((this.visual.position.y < 0.5 && this.visual.position.y > 0) || this.slidetime > 500) {
+			this.nextState = RunnerStateEnum.sSlide;
 		}
 	}
 	
 	update() {
-		if (this.jumping) {
+		if (this.state == RunnerStateEnum.sJump) {
 			this.visual.position.y += this.yvelocity * 0.004 * MS_PER_UPDATE; //0.004 is just a tested factor
 			this.yvelocity += GRAVITY * 0.003 * MS_PER_UPDATE;
 			
 			if (this.visual.position.y <= 0) {
 				this.visual.position.y = 0;
-				this.jumping = false;
 				this.yvelocity = 0;
-				if (this.willjump) {
-					this.willjump = false;
-					this.startJumping();
-				}
+				this.update_state();
 			} 
 			
+		} else if (this.state == RunnerStateEnum.sSlide) {
+			this.slidetime += MS_PER_UPDATE;
+			if (this.slidetime > 600) {
+				this.visual.position.y = 0;
+				this.slidetime = 0;
+				this.update_state();
+			}
 		}
-		
+	}
+	
+	update_state() {
+		this.state = RunnerStateEnum.sRun;
+		if (this.nextState == RunnerStateEnum.sJump) {
+			this.startJumping();
+		} else if (this.nextState == RunnerStateEnum.sSlide) {
+			this.startSliding();
+		}
 	}
 	
 	extrapolate(lag) {
@@ -194,7 +218,10 @@ class RunnerInput {
 			} else if (evt.keyCode === 38) { // up arrow
 				console.log('up');
 				this.runner.startJumping();
-			} 
+			} else if (evt.keyCode === 40) { // down arrow
+				console.log('down');
+				this.runner.startSliding();
+			}
 		}
 	}
 };
