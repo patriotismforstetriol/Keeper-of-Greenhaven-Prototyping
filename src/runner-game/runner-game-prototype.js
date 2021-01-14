@@ -8,49 +8,16 @@ The player's y-coord moves to jump.
 
 */
 
-
-//FUNC: set up environment
-let paused = true;
-let scene = new THREE.Scene();
-let container = document.getElementById('gamescreen');
-let w = container.offsetWidth;
-let h = container.offsetHeight;
-let aspect = w/h;
-let renderer = new THREE.WebGLRenderer();
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(w,h);
-container.appendChild(renderer.domElement);
-
-//FUNC: set up camera
-let camera = new THREE.PerspectiveCamera(60, aspect, 1, 1000);
-let d = 4;
-//camera.zoom = 1;
-camera.position.set(0, d, d);
-camera.lookAt(scene.position);
-camera.position.z = d-2; // so that player is lower on screen.
-camera.updateProjectionMatrix();
-
-// FUNC: set up lights
-let AmbiLight = new THREE.AmbientLight( 0x404040 , 3); // soft white light
-scene.add( AmbiLight );
-let directionalLight = new THREE.DirectionalLight( 0xffffff, 0.2);
-directionalLight.position.set(0,2*d,d);
-scene.add( directionalLight );
-
-const leftlanebound = -1;
-const rightlanebound = 1;
-const gravity = -1;
-
 // Jumping functionality : https://gamedev.stackexchange.com/questions/29617/how-to-make-a-character-jump
-class Player {
-	constructor(scene) {
+/** Class that represents the player's character in the runner game.*/
+class Runner {
+	constructor() {
 		let geometry = new THREE.BoxBufferGeometry(0.5, 1.5, 0.5);
 		let material = new THREE.MeshPhongMaterial( {color: 0x00aa33} );
 		this.visual = new THREE.Mesh( geometry, material );
 		scene.add( this.visual );
 		this.jumping = false;
 		this.lane = 0; // lanes -1, 0, 1 are valid.
-		this.moveLane();
 		this.yvelocity = 0;
 		this.willjump = false;
 	}
@@ -68,11 +35,10 @@ class Player {
 		}
 	}
 	
-	update(deltaT) {
-		//deltaT = deltaT / 100;
+	update() {
 		if (this.jumping) {
-			this.visual.position.y += this.yvelocity * (deltaT / 20);
-			this.yvelocity += gravity * (deltaT / 20);
+			this.visual.position.y += this.yvelocity * 0.04; //0.04 is just a tested factor
+			this.yvelocity += GRAVITY * 0.04;
 			
 			if (this.visual.position.y <= 0) {
 				this.visual.position.y = 0;
@@ -90,12 +56,7 @@ class Player {
 	
 }
 
-let p = new Player(scene);
-
-const DISAPPEAR_POS = 3;
-const PLATFORM_LEN = 3;
-
-
+/** Class that represents one tile on one lane. Is continually rotated through and obstacle status swapped out. */
 class PlatformTile {
 	constructor(x, y, z) {
 		let geometry = new THREE.BoxBufferGeometry(0.5, 0.5, PLATFORM_LEN);
@@ -123,6 +84,7 @@ class PlatformTile {
 	}
 }
 
+/** Class to control the ground and obstacles of the course. */
 class PlatformManager {
 	constructor(rows) {
 		this.rows = rows;
@@ -134,7 +96,6 @@ class PlatformManager {
 		for (var i = 0; i < this.rows; i++) {
 			for (var j = 0; j < this.lanes; j++) {
 				this.platforms[i][j] = new PlatformTile(0.7*(j-1), -1, -i*PLATFORM_LEN + 2);
-				//console.log(this.platforms[i][j].visual.position);
 				
 				//coloring for testing purposes
 				if ((i+j)%2 == 0) {
@@ -142,22 +103,12 @@ class PlatformManager {
 				}
 			}
 		}
-		this.accel = 1;
+		this.accel = 0.05;
 		this.leadrow = 0;
 	}
 	
-	update(deltaT) {
-		// this works, but might be a bit more risky and a bit faster
-		/*if (this.platforms[this.leadrow][0].visual.position.z > DISAPPEAR_POS) {
-			for (var j = 0; j < this.lanes; j++) {
-				this.platforms[this.leadrow][j].visual.position.z = -PLATFORM_LEN*(this.rows-1);
-			}
-			this.leadrow += 1;
-			if (this.leadrow >= this.rows) {
-				this.leadrow = 0;
-			}
-		}*/
-		let moveby = 0.05 * deltaT * this.accel;
+	update() {
+		//let moveby = 0.005 * MS_PER_UPDATE * this.accel;
 		for (var i = 0; i < this.rows; i++) {
 			
 			// check here if need to rotate the row
@@ -166,104 +117,145 @@ class PlatformManager {
 				swap = true;
 			}
 			for (var j = 0; j < this.lanes; j++) {
-				this.platforms[i][j].visual.position.z += moveby;
+				this.platforms[i][j].visual.position.z += this.accel;
 				if (swap) {
 					// move to just behind previous tile. previous tile must have been moved already.
 					if (i == 0) {
 						this.platforms[0][j].visual.position.z = 
-							this.platforms[this.rows - 1][j].visual.position.z - PLATFORM_LEN + moveby; 
-							// have to add moveby here because it hasn't been added to pos of last tile yet
+							this.platforms[this.rows - 1][j].visual.position.z - PLATFORM_LEN + this.accel; 
+							// have to add movement here because it hasn't been added to pos of last tile yet
 					} else {
 						// push them to the end
 						this.platforms[i][j].visual.position.z = 
 							this.platforms[i-1][j].visual.position.z - PLATFORM_LEN;
-						//this.platforms[i][j].visual.position.z = -PLATFORM_LEN * (this.rows - 1);
 					}
 					
 				}
-				// make them move forwards
 			}
 		}
-		this.accel += deltaT * 0.001;
+		this.accel += 0.0001; // this is obviously too fast to accelerate but
 	}
 }
 
-//let plat = new PlatformTile();
-let plat = new PlatformManager(6);
-
-
-function addMouseHandler(canvas) {
-	//canvas.addEventListener('mousemove', function (e) {onMouseMove(e);}, false);
-	//canvas.addEventListener('mousedown', function (e) {onMouseDown(e) }, false);
-	//canvas.addEventListener('mouseup', function (e) {onMouseUp(e) }, false);
-	//canvas.addEventListener('keyup', function (e) {onKeyUp(e) }, false);
-	canvas.addEventListener('keydown', function (e) {onKeyDown(e) }, false);
-}
-addMouseHandler(window);
-
-
-/*function onKeyUp(evt) {
-	if (evt.code === 'Space' || evt.which === 32) {
-		console.log("Space");
-		player.move(0.001);
+/** Class to handle clicks that relate to the Player */
+class RunnerInput {
+	constructor(runner) {
+		this.runner = runner; // the player that this instance passes its click events to
 	}
 	
-}*/
-
-function onKeyDown(evt) {
-	/*if (p.jumping) {
-		return;
-	}*/ // if you want to ban moving while jumping
-	if (evt.keyCode == 67) { // c, for testing purposes of PlatformTile
-		console.log('Toggled pause');
-		//plat.type = 1 - plat.type;
-		//plat.convertType();
-		//plat.update(10);
-		paused = !paused;
-	} else if (!paused) {
-		if (evt.keyCode === 39) { // right arrow
-			console.log('right');
-			if (p.lane + 1 <= rightlanebound) {
-				p.lane += 1;
-				p.moveLane();
-			}
-		} else if (evt.keyCode === 37) { // left arrow
-			console.log('left');
-			if (p.lane - 1 >= leftlanebound) {
-				p.lane -= 1;
-				p.moveLane();
-			}
-		} else if (evt.keyCode === 38) { // up arrow
-			console.log('up');
-			p.startJumping();
-		} 
+	/**Event handler for certain key presses. */
+	onKeyDown(evt) {
+		if (evt.keyCode == 67) { // c, for testing purposes of PlatformTile
+			console.log('Toggled pause');
+			paused = !paused;
+		} else if (!paused) {
+			if (evt.keyCode === 39) { // right arrow
+				console.log('right');
+				if (this.runner.lane + 1 <= RIGHT_BOUND) {
+					this.runner.lane += 1;
+					this.runner.moveLane();
+				}
+			} else if (evt.keyCode === 37) { // left arrow
+				console.log('left');
+				if (this.runner.lane - 1 >= LEFT_BOUND) {
+					this.runner.lane -= 1;
+					this.runner.moveLane();
+				}
+			} else if (evt.keyCode === 38) { // up arrow
+				console.log('up');
+				this.runner.startJumping();
+			} 
+		}
 	}
+};
+
+
+// constants required for the game.
+const LEFT_BOUND = -1;
+const RIGHT_BOUND = 1;
+const GRAVITY = -1;
+const DISAPPEAR_POS = 3;
+const PLATFORM_LEN = 3;
+
+/* Global vars needed because the animate() function wants to use them.*/
+let camera, scene, renderer, container;
+let runner, platform, paused;
+
+function setup() {
+	//FUNC: set up environment
+	scene = new THREE.Scene();
+	container = document.getElementById('gamescreen');
+	let w = container.offsetWidth;
+	let h = container.offsetHeight;
+	let aspect = w/h;
+	renderer = new THREE.WebGLRenderer();
+	renderer.setPixelRatio(window.devicePixelRatio);
+	renderer.setSize(w,h);
+	container.appendChild(renderer.domElement);
+
+	//FUNC: set up camera
+	camera = new THREE.PerspectiveCamera(60, aspect, 1, 1000);
+	let d = 4;
+	//camera.zoom = 1;
+	camera.position.set(0, d, d);
+	camera.lookAt(scene.position);
+	camera.position.z = d-2; // so that player is lower on screen.
+	camera.updateProjectionMatrix();
+
+	// FUNC: set up lights
+	let AmbiLight = new THREE.AmbientLight( 0x404040 , 3); // soft white light
+	scene.add( AmbiLight );
+	let directionalLight = new THREE.DirectionalLight( 0xffffff, 0.2);
+	directionalLight.position.set(0,2*d,d);
+	scene.add( directionalLight );
+
+	
+	
+	paused = true;
+	
+	runner = new Runner();
+	platform = new PlatformManager(6);
+	
+	const inputHandler = new RunnerInput(runner);
+	const addMouseHandler = function(canvas) {
+		canvas.addEventListener('keydown', function (e) {inputHandler.onKeyDown(e) }, false);
+	}
+	addMouseHandler(window);
+	
 }
 
 
-const perfectFrameTime = 1000/60; //https://stackoverflow.com/questions/13996267/loop-forever-and-provide-delta-time
+/* Global vars used by game loop.
+Reference: Fixed update, variable render pattern from: http://gameprogrammingpatterns.com/game-loop.html */
+const MS_PER_UPDATE = 1000/60; // 60 updates per sec
 let lastTimestamp = 0;
-let deltaTime = 0;
+let lag = 0; // lag saves the amount of time we haven't run update() on.
 
-function update(timestamp) {
-	deltaTime = (timestamp - lastTimestamp) / perfectFrameTime;
-	lastTimestamp = timestamp;
-}
-
+/** Function that runs continually and contains game loop.*/
 function animate() {
-	update(Date.now());
+	// Find how much time has passed
+	const currentTime = Date.now();
+	lag += (currentTime - lastTimestamp);
+	lastTimestamp = currentTime;
 	
-	if (!paused) {
-		p.update(deltaTime);
-		//console.log(deltaTime);
-		plat.update(deltaTime);
+	// Do the updates in fixed time steops of MS_PER_UPDATE
+	while (lag >= MS_PER_UPDATE) {
+		update();
+		lag -= MS_PER_UPDATE;
 	}
 	
 	requestAnimationFrame( animate );
 	renderer.render( scene, camera );
 }
 
-animate();
-            
+/** Function that updates in-world events every MS_PER_UPDATE.*/
+function update() {
+	if (!paused) {
+		runner.update();
+		platform.update();
+	}
+}
 
-			
+setup();
+lastTimestamp = Date.now();
+animate();		
