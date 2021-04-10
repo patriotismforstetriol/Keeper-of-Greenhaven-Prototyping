@@ -7,6 +7,12 @@ The player's x-coord moves to change lane.
 The player's y-coord moves to jump.
 
 */
+// constants required for the game.
+const LEFT_BOUND = -1;
+const RIGHT_BOUND = 1;
+const GRAVITY = -1;
+const DISAPPEAR_POS = 3;
+const PLATFORM_LEN = 3;
 
 // Jumping functionality : https://gamedev.stackexchange.com/questions/29617/how-to-make-a-character-jump
 /** Class that represents the player's character in the runner game.*/
@@ -96,12 +102,15 @@ class Runner {
 
 /** Class that represents one tile on one lane. Is continually rotated through and obstacle status swapped out. */
 class PlatformTile {
-	constructor(x, y, z) {
+	constructor(x, y, z, mesh) {
 		let geometry = new THREE.BoxBufferGeometry(0.5, 0.5, PLATFORM_LEN);
 		let material = new THREE.MeshPhongMaterial( {color: 0x777777} );
 		this.visual = new THREE.Mesh(geometry, material);
 		this.visual.position.set(x, y, z);
+		//this.visual = mesh;
+		//this.visual.position.set(x, y, z);
 		scene.add(this.visual);
+		
 		
 		this.type = 0;
 		this.convertType(0);
@@ -122,9 +131,21 @@ class PlatformTile {
 	}
 }
 
+class Obstacle {
+	constructor(x, y, z) {
+		let geometry = new THREE.BoxBufferGeometry(0.5, 0.5, 0.5); // cube
+		let material = new THREE.MeshPhongMaterial( {color: 0xffff00} ); // yellow
+		this.visual = new THREE.Mesh(geometry, material);
+		this.visual.position.set(x, y, z);
+		scene.add(this.visual);
+	}
+}
+
 /** Class to control the ground and obstacles of the course. */
 class PlatformManager {
-	constructor(rows) {
+	constructor(rows, baseTiles, obstacleTiles) {
+		this.baseTiles = baseTiles;
+		this.obstacleTiles = obstacleTiles;
 		this.rows = rows;
 		this.lanes = 3;
 		this.platforms = new Array(this.rows);
@@ -133,6 +154,7 @@ class PlatformManager {
 		}
 		for (var i = 0; i < this.rows; i++) {
 			for (var j = 0; j < this.lanes; j++) {
+				//this.platforms[i][j] = new PlatformTile(0.7*(j-1), -1, -i*PLATFORM_LEN + 2, this.baseTiles.clone());
 				this.platforms[i][j] = new PlatformTile(0.7*(j-1), -1, -i*PLATFORM_LEN + 2);
 				
 				//coloring for testing purposes
@@ -143,6 +165,8 @@ class PlatformManager {
 		}
 		this.accel = 0.05;
 		this.leadrow = 0;
+		
+		this.obstacles = [];
 	}
 	
 	update() {
@@ -153,6 +177,8 @@ class PlatformManager {
 			let swap = false;
 			if (this.platforms[i][0].visual.position.z > DISAPPEAR_POS) {
 				swap = true;
+				console.log(this.obstacles);
+				this.addObstacle();
 			}
 			for (var j = 0; j < this.lanes; j++) {
 				this.platforms[i][j].visual.position.z += moveby;
@@ -172,6 +198,28 @@ class PlatformManager {
 			}
 		}
 		this.accel += 0.0001; // this is obviously too fast to accelerate but
+		
+		// update obstacle positions
+		let ntoclear = 0;
+		for (let i = 0; i < this.obstacles.length; ++i) {
+			if (this.obstacles[i].visual.position.z > DISAPPEAR_POS) {
+				ntoclear ++;
+			} else {
+				this.obstacles[i].visual.position.z += moveby;
+			}
+		}
+		for (let i = 0; i < ntoclear; ++i) {
+			this.obstacles.shift();
+		}
+		
+	}
+	
+	addObstacle() {
+		if (Math.random() > 0.5) { //50% chance of generating one this row
+			const lane = Math.floor((Math.random() * this.lanes)); // choose a lane at random
+			this.obstacles.push(new Obstacle(0.7*(lane-1),
+								-0.5,-this.rows * PLATFORM_LEN + 2)); //put it at the current end
+		}
 	}
 	
 	extrapolate(lag) {
@@ -227,13 +275,6 @@ class RunnerInput {
 };
 
 
-// constants required for the game.
-const LEFT_BOUND = -1;
-const RIGHT_BOUND = 1;
-const GRAVITY = -1;
-const DISAPPEAR_POS = 3;
-const PLATFORM_LEN = 3;
-
 /* Global vars needed because the animate() function wants to use them.*/
 let camera, scene, renderer, container;
 let runner, platform, paused;
@@ -266,8 +307,6 @@ function setup() {
 	directionalLight.position.set(0,2*d,d);
 	scene.add( directionalLight );
 
-	
-	
 	paused = true;
 	
 	runner = new Runner();
@@ -278,6 +317,18 @@ function setup() {
 		canvas.addEventListener('keydown', function (e) {inputHandler.onKeyDown(e) }, false);
 	}
 	addMouseHandler(window);
+	
+	
+	/*const loader = new THREE.GLTFLoader();
+	loader.load( 'obstacles.glb', function ( gltf ) {				
+		// Add in the scene.
+		const base = gltf.scene.children.filter(obj => obj.name === 'Tile')[0];
+		const blocks = gltf.scene.children.splice(gltf.scene.children.indexOf(base), 1);
+		
+		
+	});*/
+	
+	
 	
 }
 
@@ -307,7 +358,8 @@ function animate() {
 	deextrapolate(lag);
 }
 
-/** Function that updates in-world events every MS_PER_UPDATE.*/
+/** Function that updates in-world events every MS_PER_UPDATE. To make this OO, give this to
+a game manager that has a list of all players/things to update*/
 function update() {
 	if (!paused) {
 		runner.update();
