@@ -177,6 +177,7 @@ class PlatformManager {
 				BBox.setFromObject(this.obstacles[i].visual);
 				if (BBox.intersectsBox(playerBox)) {
 					this.obstacles[i].visual.material.color.setHex(0x777733);
+					ended = true;
 				} else {
 					this.obstacles[i].visual.material.color.setHex(0xffff00);
 				}
@@ -251,7 +252,22 @@ class PlatformManager {
 			}
 		}
 	}
-}
+};
+
+class GameOverScreen {
+	constructor() {
+		this.screen = document.getElementById("infoscreen");
+		this.screen.style.display = 'block';
+		
+		const title = document.createElement("div");
+		title.innerHTML += "<h1>Game Over</h1>";
+		title.style.width = "30%";
+		title.style.marginLeft = "35%";
+		title.setAttribute('align', 'center');
+		this.screen.appendChild(title);
+	}
+};
+
 
 /** Class to handle clicks that relate to the Player */
 class RunnerInput {
@@ -291,7 +307,7 @@ class RunnerInput {
 
 /* Global vars needed because the animate() function wants to use them.*/
 let camera, scene, renderer, container;
-let runner, platform, paused;
+let runner, platform, paused, ended;
 
 function setup() {
 	//FUNC: set up environment
@@ -322,6 +338,7 @@ function setup() {
 	scene.add( directionalLight );
 
 	paused = true;
+	ended = false;
 	
 	runner = new Runner();
 	platform = new PlatformManager(6);
@@ -353,6 +370,10 @@ const MS_PER_UPDATE = 1000/60; // 60 updates per sec
 let lastTimestamp = 0;
 let lag = 0; // lag saves the amount of time we haven't run update() on.
 
+const sleep = milliseconds => {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+};
+
 /** Function that runs continually and contains game loop.*/
 function animate() {
 	// Find how much time has passed
@@ -375,11 +396,16 @@ function animate() {
 /** Function that updates in-world events every MS_PER_UPDATE. To make this OO, give this to
 a game manager that has a list of all players/things to update*/
 function update() {
-	if (!paused) {
+	if (!ended && !paused) {
 		//check for collisions
 		const pBox = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3());
 		pBox.setFromObject(runner.visual);
 		platform.checkCollisions(pBox);
+		if (ended) {
+			sleep(500).then(() => {
+				new GameOverScreen();
+			});
+		}
 		
 		// move objects
 		runner.update();
