@@ -139,6 +139,7 @@ class Obstacle {
 		this.visual.position.set(x, y, z);
 		scene.add(this.visual);
 	}
+	
 }
 
 /** Class to control the ground and obstacles of the course. */
@@ -169,6 +170,20 @@ class PlatformManager {
 		this.obstacles = [];
 	}
 	
+	checkCollisions(playerBox) {
+		const BBox = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3());
+		for (let i = 0; i < this.obstacles.length; ++i) {
+			if (this.obstacles[i].visual.position.z < PLATFORM_LEN) { //if it's close to player
+				BBox.setFromObject(this.obstacles[i].visual);
+				if (BBox.intersectsBox(playerBox)) {
+					this.obstacles[i].visual.material.color.setHex(0x777733);
+				} else {
+					this.obstacles[i].visual.material.color.setHex(0xffff00);
+				}
+			}
+		}
+	}
+	
 	update() {
 		let moveby = 0.04 * MS_PER_UPDATE * this.accel;
 		for (var i = 0; i < this.rows; i++) {
@@ -177,7 +192,6 @@ class PlatformManager {
 			let swap = false;
 			if (this.platforms[i][0].visual.position.z > DISAPPEAR_POS) {
 				swap = true;
-				console.log(this.obstacles);
 				this.addObstacle();
 			}
 			for (var j = 0; j < this.lanes; j++) {
@@ -197,7 +211,7 @@ class PlatformManager {
 				}
 			}
 		}
-		this.accel += 0.0001; // this is obviously too fast to accelerate but
+		this.accel += 0.000001; // this is obviously too fast to accelerate but
 		
 		// update obstacle positions
 		let ntoclear = 0;
@@ -362,6 +376,12 @@ function animate() {
 a game manager that has a list of all players/things to update*/
 function update() {
 	if (!paused) {
+		//check for collisions
+		const pBox = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3());
+		pBox.setFromObject(runner.visual);
+		platform.checkCollisions(pBox);
+		
+		// move objects
 		runner.update();
 		platform.update();
 	}
