@@ -100,7 +100,21 @@ class Runner {
 	
 }
 
-/** Class that represents one tile on one lane. Is continually rotated through and obstacle status swapped out. */
+const TILE_COMPONENTS = [
+	[EDGE_L, FREE, FREE, FREE, EDGE_R], // full clear
+	[EDGE_L, BOX, FREE, FREE, EDGE_R], // box on left
+	[EDGE_L, FREE, BOX, FREE, EDGE_R], // box in middle
+	[EDGE_L, FREE, FREE, BOX, EDGE_R], // box on right
+]; //@then have the loader function construct all these models?
+// for index i in TILE_COMPONENTS, the probability of the next tile being tile j is the jth entry. 
+const TILE_TRANSITIONS = [
+	[0.25, 0.25, 0.25, 0.25],
+	[0.4, 0, 0.3, 0.3],
+	[0.4, 0.3, 0, 0.3],
+	[0.4, 0.3, 0.3, 0],
+];
+
+/** Class that represents one tile (spans one unit, three lanes). Is continually rotated through and obstacle status swapped out. */
 class PlatformTile {
 	constructor(x, y, z, mesh) {
 		let geometry = new THREE.BoxBufferGeometry(0.5, 0.5, PLATFORM_LEN);
@@ -131,45 +145,21 @@ class PlatformTile {
 	}
 }
 
-class Obstacle {
-	constructor(x, y, z) {
-		let geometry = new THREE.BoxBufferGeometry(0.5, 0.5, 0.5); // cube
-		let material = new THREE.MeshPhongMaterial( {color: 0xffff00} ); // yellow
-		this.visual = new THREE.Mesh(geometry, material);
-		this.visual.position.set(x, y, z);
-		scene.add(this.visual);
-	}
-	
-}
-
 /** Class to control the ground and obstacles of the course. */
 class PlatformManager {
-	constructor(rows, baseTiles, obstacleTiles) {
-		this.baseTiles = baseTiles;
-		this.obstacleTiles = obstacleTiles;
+	constructor(rows, tiles) {
+		this.baseTiles = tiles;
+		this.tileChoices = []; //@ should be some contant
 		this.rows = rows;
 		this.lanes = 3;
-		this.platforms = new Array(this.rows);
-		for (var i = 0; i < this.rows; i++) {
-			this.platforms[i] = new Array(this.lanes);
+		this.platforms = new Array(this.rowsZX
+			this.platforms[i] = this.baseTiles[0]; // should this be an object instead? how will instancing work?
 		}
-		for (var i = 0; i < this.rows; i++) {
-			for (var j = 0; j < this.lanes; j++) {
-				//this.platforms[i][j] = new PlatformTile(0.7*(j-1), -1, -i*PLATFORM_LEN + 2, this.baseTiles.clone());
-				this.platforms[i][j] = new PlatformTile(0.7*(j-1), -1, -i*PLATFORM_LEN + 2);
-				
-				//coloring for testing purposes
-				if ((i+j)%2 == 0) {
-					this.platforms[i][j].convertType(1);	
-				}
-			}
-		}
-		this.accel = 0.05;
-		this.leadrow = 0;
 		
-		this.obstacles = [];
+		this.accel = 1;
 	}
 	
+
 	checkCollisions(playerBox) {
 		const BBox = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3());
 		for (let i = 0; i < this.obstacles.length; ++i) {
@@ -186,55 +176,36 @@ class PlatformManager {
 	}
 	
 	update() {
-		let moveby = 0.04 * MS_PER_UPDATE * this.accel;
+		let moveby = 0.0001 * MS_PER_UPDATE * this.accel;
 		for (var i = 0; i < this.rows; i++) {
-			
 			// check here if need to rotate the row
-			let swap = false;
-			if (this.platforms[i][0].visual.position.z > DISAPPEAR_POS) {
-				swap = true;
-				this.addObstacle();
-			}
-			for (var j = 0; j < this.lanes; j++) {
-				this.platforms[i][j].visual.position.z += moveby;
-				if (swap) {
-					// move to just behind previous tile. previous tile must have been moved already.
-					if (i == 0) {
-						this.platforms[0][j].visual.position.z = 
-							this.platforms[this.rows - 1][j].visual.position.z - PLATFORM_LEN + moveby; 
-							// have to add movement here because it hasn't been added to pos of last tile yet
-					} else {
-						// push them to the end
-						this.platforms[i][j].visual.position.z = 
-							this.platforms[i-1][j].visual.position.z - PLATFORM_LEN;
-					}
-					
+			this.platforms[i].visual.position.z += moveby;
+			if (this.platforms[i].visual.position.z > DISAPPEAR_POS) { // need to swap
+				// move to just behind previous tile. previous tile must have been moved already.
+				if (i == 0) {
+					this.platforms[0].visual.position.z = 
+						this.platforms[this.rows - 1].visual.position.z - PLATFORM_LEN + moveby; 
+						// have to add movement here because it hasn't been added to pos of last tile yet
+				} else {
+					// push them to the end
+					this.platforms[i].visual.position.z = 
+						this.platforms[i-1].visual.position.z - PLATFORM_LEN;
 				}
+				this.generateTile(i);
 			}
 		}
 		this.accel += 0.000001; // this is obviously too fast to accelerate but
 		
-		// update obstacle positions
-		let ntoclear = 0;
-		for (let i = 0; i < this.obstacles.length; ++i) {
-			if (this.obstacles[i].visual.position.z > DISAPPEAR_POS) {
-				ntoclear ++;
-			} else {
-				this.obstacles[i].visual.position.z += moveby;
-			}
-		}
-		for (let i = 0; i < ntoclear; ++i) {
-			this.obstacles.shift();
-		}
-		
 	}
 	
-	addObstacle() {
-		if (Math.random() > 0.5) { //50% chance of generating one this row
-			const lane = Math.floor((Math.random() * this.lanes)); // choose a lane at random
-			this.obstacles.push(new Obstacle(0.7*(lane-1),
-								-0.5,-this.rows * PLATFORM_LEN + 2)); //put it at the current end
-		}
+	
+	generateTile(index) {
+		// function to call when tile at a certain index needs to be rerolled
+		
+		// find previous tile, use it to determine our probabilities
+		
+		// roll random number, using previous tile's probabilities to determine new identity
+		
 	}
 	
 	extrapolate(lag) {

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Runner Game Prototype</title>
+		<style>
+			body { margin: 0; }
+			canvas { display: block; }
+			div { position: absolute; }
+			#gamescreen {
+				height: 768px;
+				width: 1064px;
+				position: center-left;
+				background-color: green;
+			}
+			#infoscreen {
+				margin: 150px;
+				height: 468px;
+				width: 764px;
+				position: center-left;
+				background-color: white;
+				display: none;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="gamescreen"></div>
+		<div id="infoscreen"></div>
+		<script type="module" src="runner-game-graphics.js"></script>
+	</body>
+</html>
