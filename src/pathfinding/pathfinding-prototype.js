@@ -221,7 +221,7 @@ class PlayerCombatant {
 		// character is a 3D model located on an invisible axis object
 		// this is so that character can rotate without camera rotating too
 		this.axis = new THREE.Object3D();
-		this.axis.onBeforeRender = this.extrapolate;
+		//this.axis.onBeforeRender = this.extrapolate; // doesn't work
 		this.appearance = appearance;
 		this.position = new THREE.Vector3();
 		this.axis.add(this.appearance);
@@ -314,14 +314,13 @@ class PlayerCombatant {
 	/** Move the player a little further along their velocity vector, when we need 
 	* to extrapolate because the current render time is a bit beyond the current
 	* update status. */
-	extrapolate(lagfraction) {
+	/*extrapolate(lagfraction) {
 		if (this.velocity.length() > 0) {
 			const movement = this.velocity.clone();
 			movement.multiplyScalar(lagfraction);
 			this.axis.position.add(movement); 	
-			//@add a line to add appearance extrapolating?
 		}
-	}
+	}*/
 };
 
 /** Class representing the position of the last click in-world as a small sphere.
@@ -537,7 +536,7 @@ function setup() {
 /* Global vars used by game loop.
 Reference: Fixed update, variable render pattern from: http://gameprogrammingpatterns.com/game-loop.html
 */
-const MS_PER_UPDATE = 1000/90; // 60 updates per sec
+const MS_PER_UPDATE = 1000/60; // 60 updates per sec
 let lastTimestamp = 0;
 let lag = 0; // lag saves the amount of time we haven't run update() on.
 
@@ -554,6 +553,7 @@ function animate() {
 		lag -= MS_PER_UPDATE;
 	}
 	
+	extrapolate();
 	requestAnimationFrame( animate );
 	renderer.render( scene, camera );
 }
@@ -561,6 +561,11 @@ function animate() {
 /** Function that updates in-world events every MS_PER_UPDATE.*/
 function update() {
 	playerInputController.player.do_pathfollowing();
+}
+
+function extrapolate() {
+	// Only causes camera jitters
+	//playerInputController.player.extrapolate(lag / MS_PER_UPDATE);
 }
 
 setup();

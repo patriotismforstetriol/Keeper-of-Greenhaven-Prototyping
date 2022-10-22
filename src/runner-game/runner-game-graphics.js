@@ -39,11 +39,13 @@ controls.maxPolarAngle = Math.PI / 2;
 controls.update();
 
 // FUNC: set up lights
-let AmbiLight = new THREE.AmbientLight( 0x404040 , 3); // soft white light
-scene.add( AmbiLight );
+//let AmbiLight = new THREE.AmbientLight( 0x404040 , 3); // soft white light
+//scene.add( AmbiLight );
 let directionalLight = new THREE.DirectionalLight( 0xffffff, 0.2);
 directionalLight.position.set(0,20,3);
 scene.add( directionalLight );
+let hemiLight = new THREE.HemisphereLight();
+scene.add( hemiLight );
 
 // test screen works
 const bgeo = new THREE.BoxGeometry(1, 1, 1);
@@ -64,19 +66,28 @@ function animate() {
 document.addEventListener('keydown', (e) => {
     if (e.code === "Space") {
 		console.log("Space");
-		if (assetstate === "add") {
-			scene.add( assetkit.children[asseti].clone() );
-			console.log("Add", assetkit.children[asseti].name);
-			assetstate = "shift";
-		} else if (assetstate === "shift") {
+		if (assetkit.state === "add") {
+			//scene.add( assetkit.children[asseti].clone() );
+			//console.log("Add", assetkit.children[asseti].name);
+			
+			//console.log(assetkit);
+			
+			scene.add( assetkit.bgPrefabs.scene.children[0].clone() ); 
+			scene.add( assetkit.bgPrefabs.scene.children[3].clone() ); 
+			scene.add( assetkit.fgPrefabs.scene.children[1].clone() ); 
+			scene.add( assetkit.fgPrefabs.scene.children[2].clone() ); 
+			scene.add( assetkit.trackPrefabs.roadPrefabs.scene.children[0].clone() ); 
+			scene.add( assetkit.obstPrefabs.scene.children[3].clone() );
+			assetkit.state = "shift";
+		} else if (assetkit.state === "shift") {
 			const n = scene.getObjectByName(assetkit.children[asseti].name);
 			n.position.set(2,0,0);
-			assetstate = "remove";
+			assetkit.state = "remove";
 		} else {
 			const n = scene.getObjectByName(assetkit.children[asseti].name);
 			scene.remove( n );
 			console.log("Removed", asseti, scene.children, n, assetkit.children[asseti]);
-			assetstate = "add";
+			assetkit.state = "add";
 			asseti += 1;
 		}
     }
@@ -84,10 +95,43 @@ document.addEventListener('keydown', (e) => {
 
 
 const loader = new GLTFLoader();
+/*function myGltfLoad( gltf ) {
+	scene.add( gltf.scene );
+	//return(gltf.scene);
+
+	}, function ( xhr ) {
+		
+		if (abs(xhr.loaded - xhr.total) < 0.1) {
+			console.log( gltf, "loaded." );
+		}
+
+	}, function ( error ) {
+
+		console.error( error );
+
+	} 	
+}*/
+
 let assetkit;
-let asseti = 0;
-let assetstate = "add";
-loader.load( 'runner-game-models.glb', function ( gltf ) {
+async function init() {
+	assetkit = {
+		state: "add",
+		bgPrefabs:   await loader.loadAsync("runner-game-models--bg.glb"),
+		fgPrefabs:   await loader.loadAsync("runner-game-models--fg.glb"),
+		bonusPrefabs: await loader.loadAsync("runner-game-models--bonus.glb"),
+		obstPrefabs: await loader.loadAsync("runner-game-models--obstacles.glb"),
+		trackPrefabs: {
+			roadPrefabs: await loader.loadAsync("runner-game-models--track-road.glb"),
+			pitPrefabs:  await loader.loadAsync("runner-game-models--track-pit.glb"),
+			bridgePrefabs: await loader.loadAsync("runner-game-models--track-bridge.glb")
+		}
+	};
+
+}
+init();
+//let asseti = 0;
+//let assetstate = "add";
+/*loader.load( 'runner-game-models.glb', function ( gltf ) {
 	//scene.add( gltf.scene );
 	
 	console.log("Here is what was loaded: ");
@@ -108,6 +152,6 @@ loader.load( 'runner-game-models.glb', function ( gltf ) {
 	console.error( error );
 
 	} 
-);
+);*/
 
 animate();
