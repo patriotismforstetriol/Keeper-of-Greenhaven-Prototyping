@@ -54,68 +54,213 @@ const bcube = new THREE.Mesh(bgeo, bmat);
 bcube.position.set(1,2,0);
 scene.add(bcube);
 
+class Runner {
+	GameStateEnum = Object.freeze({sLoading:0, sRunning:1, sPaused:2, sPlayerDead:3});
+	gameState;
+	timer;
+
+	// Scoring values
+	scoreMultiplier;
+
+
+	// Player
+	visual; // mesh
+
+	constructor() {
+		// AWAKEN
+		this.gameState = this.GameStateEnum.sLoading;
+		// TODO: get player appearance
+		//this.createPlayer();
+		// TODO: get player's level and exp at beginning of run
+
+		// INITIALISE
+		// TODO: make TrackGenerator
+
+		//this.gameState = this.GameStateEnum.sRunning;
+	}
+
+	createPlayer() {
+		let geometry = new THREE.BoxBufferGeometry(0.5, 1.5, 0.5);
+		let material = new THREE.MeshPhongMaterial( {color: 0x00aa33} );
+		this.visual = new THREE.Mesh( geometry, material );
+		scene.add( this.visual );
+	}
+
+	update( deltaTime ) {
+		if ( gameState != this.GameStateEnum.sRunning ) {
+			return;
+		}
+		move( deltaTime ); // TODO
+		stayOnTheGround(); //TODO
+		getInput(); //TODO
+		this.timer += deltaTime;
+		checkMultiplier();
+	}
+
+	move() {
+		// TODO: see game prototype
+	}
+
+	checkMultiplier() {
+		// TODO: see update method in PlayerController.cs
+	}
+
+	// TODO: show multiplier labels
+	// TODO: show powerup labels
+
+	isPaused() {
+		return (this.gameState != this.GameStateEnum.sRunning);
+	}
+
+	unPause() {
+		this.gameState = this.GameStateEnum.sRunning;
+	}
+
+}
+
+function threejsDispose(obj) {
+	//https://threejs.org/docs/#manual/en/introduction/How-to-dispose-of-objects
+
+	if ( typeof(obj) == "Mesh" ) {
+		obj.material.map.dispose(); // texture
+		obj.material.dispose();
+		obj.geometry.dispose();
+	}
+
+	obj.children.forEach((child) => {
+		threejsDispose(child);
+	});
+} 
+
+class TrackGenerator {
+	player;
+
+	// Prefab Arrays
+	roadSegmentPrefabs;
+	pitSegmentPrefabs;
+	bridgeSegmentPrefabs;
+	foregroundPrefabs;
+	backgroundPrefabs;
+	obstaclePrefabs;
+	coinPrefab;
+	powerupPrefabs;
+
+	// Current existing gameobjects
+	trackObjects;
+	foregroundObjects;
+	obstacleObjects;
+	coinObjects;
+	powerupObjects;
+
+	// Queues
+	foregroundQueue;
+	backgroundQueue;
+
+	// Game Track Constants
+
+
+	constructor(assetkit, player) {
+		this.player = player;
+
+		this.roadSegmentPrefabs = assetkit.trackPrefabs.roadPrefabs.scene.children;
+		this.pitSegmentPrefabs = assetkit.trackPrefabs.pitPrefabs.scene.children;
+		this.bridgeSegmentPrefabs = assetkit.trackPrefabs.bridgePrefabs.scene.children;
+		this.foregroundPrefabs = assetkit.fgPrefabs.scene.children;
+		this.backgroundPrefabs = assetkit.bgPrefabs.scene.children;
+		this.obstaclePrefabs = assetkit.obstPrefabs.scene.children;
+
+		this.coinPrefab = assetkit.bonusPrefabs.scene.children[0];
+		this.powerupPrefabs = assetkit.bonusPrefabs.scene.children.filter(obj => obj != "Coin");
+	
+		this.trackObjects = [];
+		this.foregroundObjects = [];
+		this.obstacleObjects = [];
+		this.coinObjects = [];
+		this.powerupObjects = [];
+
+		this.foregroundQueue = [];
+		this.backgroundQueue = [];
+	
+		// can we just immediately GenerateObstacles?
+		// or just wait for update method?
+
+		this.player.unPause();
+	}
+
+	update() {
+		if (!this.player.isPaused()) {
+			this.#generateTrack();
+			this.#generateObstacles();
+			this.#generateCoins();
+			this.#generatePowerups();
+			this.#generateEnvironment();
+			//then do cleanup?
+		}
+	}
+
+	 #generateTrack() {
+		const randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+		
+		if (this.trackObjects.length != 0) {
+			const toDelete = this.trackObjects.pop();
+			scene.remove(toDelete);
+			threejsDispose(toDelete);
+		} 
+
+		this.trackObjects.push(randomPrefab);
+		scene.add(randomPrefab);
+	 }
+
+	 #generateEnvironment() {
+
+	 }
+
+	 #generateObstacles() {
+
+	 }
+
+	 #generateCoins() {
+
+	 }
+
+	 #generatePowerups() {
+
+	 }
+}
+
+let myTrackGenerator = undefined;
+
 function animate() {
 	requestAnimationFrame( animate );
 	
+	/*if (myTrackGenerator != undefined) {
+		myTrackGenerator.update();
+	}*/
 	controls.update();
 	
 	renderer.render(scene, camera);
 
 }
 
+
+
 document.addEventListener('keydown', (e) => {
     if (e.code === "Space") {
 		console.log("Space");
-		if (assetkit.state === "add") {
-			//scene.add( assetkit.children[asseti].clone() );
-			//console.log("Add", assetkit.children[asseti].name);
-			
-			//console.log(assetkit);
-			
-			scene.add( assetkit.bgPrefabs.scene.children[0].clone() ); 
-			scene.add( assetkit.bgPrefabs.scene.children[3].clone() ); 
-			scene.add( assetkit.fgPrefabs.scene.children[1].clone() ); 
-			scene.add( assetkit.fgPrefabs.scene.children[2].clone() ); 
-			scene.add( assetkit.trackPrefabs.roadPrefabs.scene.children[0].clone() ); 
-			scene.add( assetkit.obstPrefabs.scene.children[3].clone() );
-			assetkit.state = "shift";
-		} else if (assetkit.state === "shift") {
-			const n = scene.getObjectByName(assetkit.children[asseti].name);
-			n.position.set(2,0,0);
-			assetkit.state = "remove";
-		} else {
-			const n = scene.getObjectByName(assetkit.children[asseti].name);
-			scene.remove( n );
-			console.log("Removed", asseti, scene.children, n, assetkit.children[asseti]);
-			assetkit.state = "add";
-			asseti += 1;
+		if (myTrackGenerator != undefined) {
+			myTrackGenerator.update();
 		}
     }
 });
 
 
+
+
+
 const loader = new GLTFLoader();
-/*function myGltfLoad( gltf ) {
-	scene.add( gltf.scene );
-	//return(gltf.scene);
 
-	}, function ( xhr ) {
-		
-		if (abs(xhr.loaded - xhr.total) < 0.1) {
-			console.log( gltf, "loaded." );
-		}
-
-	}, function ( error ) {
-
-		console.error( error );
-
-	} 	
-}*/
-
-let assetkit;
 async function init() {
-	assetkit = {
-		state: "add",
+	let assetkit = {
 		bgPrefabs:   await loader.loadAsync("runner-game-models--bg.glb"),
 		fgPrefabs:   await loader.loadAsync("runner-game-models--fg.glb"),
 		bonusPrefabs: await loader.loadAsync("runner-game-models--bonus.glb"),
@@ -127,31 +272,10 @@ async function init() {
 		}
 	};
 
+	let myRunner = new Runner();
+	myTrackGenerator = new TrackGenerator(assetkit, myRunner);
+	console.log("Loaded!");
 }
 init();
-//let asseti = 0;
-//let assetstate = "add";
-/*loader.load( 'runner-game-models.glb', function ( gltf ) {
-	//scene.add( gltf.scene );
-	
-	console.log("Here is what was loaded: ");
-	console.log(gltf.animations); // Array<THREE.AnimationClip>
-	console.log(gltf.scene); // THREE.Group
-	console.log(gltf.scenes); // Array<THREE.Group>
-	console.log(gltf.cameras); // Array<THREE.Camera>
-	console.log(gltf.asset); // Object
-	
-	assetkit = gltf.scene;
-
-	}, function ( xhr ) {
-
-		console.log( ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
-
-	}, function ( error ) {
-
-	console.error( error );
-
-	} 
-);*/
 
 animate();
