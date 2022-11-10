@@ -155,16 +155,102 @@ class TrackGenerator {
 	// Queues
 	foregroundQueue;
 	backgroundQueue;
+	specialSegmentSequenceLen;
 
 	// Game Track Constants
-
+	static TrackTypeEnum = Object.freeze({tRoad:0, tPit:1, tBridge:2});
+	static TrackXPosEnum = Object.freeze({tLeft:0, tCentre:1, tRight:2, tDoubleLeft:3, tDoubleRight:4});
+	static TrackZPosEnum = Object.freeze({tStart:0, tGoOn:1, tEnd:2});
+	static #trackPosHash(XPos, ZPos) { return XPos * Object.keys(TrackGenerator.TrackZPosEnum).length + ZPos; }
 
 	constructor(assetkit, player) {
 		this.player = player;
 
 		this.roadSegmentPrefabs = assetkit.trackPrefabs.roadPrefabs.scene.children;
-		this.pitSegmentPrefabs = assetkit.trackPrefabs.pitPrefabs.scene.children;
-		this.bridgeSegmentPrefabs = assetkit.trackPrefabs.bridgePrefabs.scene.children;
+		this.roadSegmentPrefabs.forEach((pf) => { pf.userData.trackType = TrackGenerator.TrackTypeEnum.tRoad; });
+
+		// Assumes there's only one version of each trackPosHash
+		const pitSegs = assetkit.trackPrefabs.pitPrefabs.scene.children;
+		this.pitSegmentPrefabs = new Array(pitSegs.length);
+		this.pitSegmentPrefabs.fill(null);
+		pitSegs.forEach((pf) => { pf.userData.trackType = TrackGenerator.TrackTypeEnum.tPit; });
+		pitSegs.forEach((pf) => {
+			let xPos;
+			if (pf.name.search("_SINGLE_CENTER") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tCentre;
+			} else if (pf.name.search("_SINGLE_RIGHT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tRight;
+			} else if (pf.name.search("_SINGLE_LEFT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tLeft;
+			} else if (pf.name.search("_DOUBLE_RIGHT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tDoubleRight;
+			} else if (pf.name.search("_DOUBLE_LEFT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tDoubleLeft;
+			} else {
+				console.log("Failed to categorise x position of " + pf.name);
+				return;
+			}
+			pf.userData.trackXPos = xPos;
+
+			let zPos;
+			if (pf.name.search("_START") >= 0) {
+				zPos = TrackGenerator.TrackZPosEnum.tStart;
+			} else if (pf.name.search("_END") >= 0) {
+				zPos = TrackGenerator.TrackZPosEnum.tEnd;
+			} else {
+				zPos = TrackGenerator.TrackZPosEnum.tGoOn;
+			}
+
+			const myhash = TrackGenerator.#trackPosHash(xPos, zPos);
+			if (this.pitSegmentPrefabs[myhash] === null) {
+				this.pitSegmentPrefabs[myhash] = pf;				
+			} else {
+				console.log("Tried to load duplicate pit tracks with xPos " + xPos + " and zPos " + zPos);
+			}
+		})
+
+		const bridgeSegs = assetkit.trackPrefabs.bridgePrefabs.scene.children;
+		this.bridgeSegmentPrefabs = new Array(bridgeSegs.length);
+		this.bridgeSegmentPrefabs.fill(null);
+		bridgeSegs.forEach((pf) => { pf.userData.trackType = TrackGenerator.TrackTypeEnum.tBridge; });
+		bridgeSegs.forEach((pf) => {
+			let xPos;
+			if (pf.name.search("_CENTER") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tCentre;
+			} else if (pf.name.search("_RIGHT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tRight;
+			} else if (pf.name.search("_LEFT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tLeft;
+			} else if (pf.name.search("_DOUBLE_RIGHT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tDoubleRight;
+			} else if (pf.name.search("_DOUBLE_LEFT") >= 0) {
+				xPos = TrackGenerator.TrackXPosEnum.tDoubleLeft;
+			} else {
+				console.log("Failed to categorise x position of " + pf.name);
+				return;
+			}
+			pf.userData.trackXPos = xPos;
+
+			let zPos;
+			if (pf.name.search("_START") >= 0) {
+				zPos = TrackGenerator.TrackZPosEnum.tStart;
+			} else if (pf.name.search("_END") >= 0) {
+				zPos = TrackGenerator.TrackZPosEnum.tEnd;
+			} else if (pf.name.search("_MIDDLE") >= 0) {
+				zPos = TrackGenerator.TrackZPosEnum.tGoOn;
+			} else {
+				console.log("Failed to categorise z position of " + pf.name);
+				return;
+			}
+
+			const myhash = TrackGenerator.#trackPosHash(xPos, zPos);
+			if (this.bridgeSegmentPrefabs[myhash] === null) {
+				this.bridgeSegmentPrefabs[myhash] = pf;				
+			} else {
+				console.log("Tried to load duplicate bridge tracks with xPos " + xPos + " and zPos " + zPos);
+			}
+		})
+
 		this.foregroundPrefabs = assetkit.fgPrefabs.scene.children;
 		this.backgroundPrefabs = assetkit.bgPrefabs.scene.children;
 		this.obstaclePrefabs = assetkit.obstPrefabs.scene.children;
@@ -180,6 +266,11 @@ class TrackGenerator {
 
 		this.foregroundQueue = [];
 		this.backgroundQueue = [];
+		this.specialSegmentSequenceLen = -1;
+
+		console.log(this.roadSegmentPrefabs);
+		console.log(this.pitSegmentPrefabs);
+		console.log(this.bridgeSegmentPrefabs);
 	
 		// can we just immediately GenerateObstacles?
 		// or just wait for update method?
@@ -194,21 +285,61 @@ class TrackGenerator {
 			this.#generateCoins();
 			this.#generatePowerups();
 			this.#generateEnvironment();
-			//then do cleanup?
 		}
 	}
 
 	 #generateTrack() {
-		const randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+		// NOTE: NUMBER OF XPOS VARIANTS FOR BRIDGE (3) AND PIT (5) ARE HARDCODED. 
+		let randomPrefab;
 		
-		if (this.trackObjects.length != 0) {
-			const toDelete = this.trackObjects.pop();
-			scene.remove(toDelete);
-			threejsDispose(toDelete);
-		} 
+		if (this.trackObjects.length == 0) {
+			randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+		} else {
+			const predecessor = this.trackObjects.pop();
+
+			if (predecessor.userData.trackType === TrackGenerator.TrackTypeEnum.tBridge) {
+				if (this.specialSegmentSequenceLen > 0) {
+					this.specialSegmentSequenceLen -= 1;
+					randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tGoOn)].clone();
+				} else if (this.specialSegmentSequenceLen == 0) {
+					this.specialSegmentSequenceLen -= 1;
+					randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tEnd)].clone();
+				} else {
+					// Get a regular road
+					randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+				}
+			} else if (predecessor.userData.trackType === TrackGenerator.TrackTypeEnum.tPit) {
+				if (this.specialSegmentSequenceLen > 0) {
+					this.specialSegmentSequenceLen -= 1;
+					randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tGoOn)].clone();
+				} else if (this.specialSegmentSequenceLen == 0) {
+					this.specialSegmentSequenceLen -= 1;
+					randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tEnd)].clone();
+				} else {
+					randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+				}
+			} else { // Regular Road
+				const val = Math.random();
+				if (val < 0.03) { // 30% of one tenth: Select bridge
+					this.specialSegmentSequenceLen = Math.floor(Math.random() * 3);
+					randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(Math.floor(Math.random() * 3), TrackGenerator.TrackZPosEnum.tStart)].clone();
+				} else if (val < 0.1) { // 70% of one tenth: Select pit
+					this.specialSegmentSequenceLen = Math.floor(Math.random() * 5);
+					randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(Math.floor(Math.random() * 5), TrackGenerator.TrackZPosEnum.tStart)].clone();
+				} else {
+					randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+				}
+			}
+
+			scene.remove(predecessor);
+			threejsDispose(predecessor);
+		}
+
+		console.log(randomPrefab.name);
 
 		this.trackObjects.push(randomPrefab);
 		scene.add(randomPrefab);
+
 	 }
 
 	 #generateEnvironment() {
