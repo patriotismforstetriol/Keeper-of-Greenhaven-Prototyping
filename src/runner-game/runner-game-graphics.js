@@ -48,11 +48,11 @@ let hemiLight = new THREE.HemisphereLight();
 scene.add( hemiLight );
 
 // test screen works
-const bgeo = new THREE.BoxGeometry(1, 1, 1);
+/*const bgeo = new THREE.BoxGeometry(1, 1, 1);
 const bmat = new THREE.MeshBasicMaterial({color: 0x44aa88});
 const bcube = new THREE.Mesh(bgeo, bmat);
 bcube.position.set(1,2,0);
-scene.add(bcube);
+scene.add(bcube);*/
 
 class Runner {
 	GameStateEnum = Object.freeze({sLoading:0, sRunning:1, sPaused:2, sPlayerDead:3});
@@ -66,11 +66,14 @@ class Runner {
 	// Player
 	visual; // mesh
 
+	// Player Constants
+	sightDistance = 20;
+
 	constructor() {
 		// AWAKEN
 		this.gameState = this.GameStateEnum.sLoading;
 		// TODO: get player appearance
-		//this.createPlayer();
+		this.createPlayer();
 		// TODO: get player's level and exp at beginning of run
 
 		// INITIALISE
@@ -83,6 +86,7 @@ class Runner {
 		let geometry = new THREE.BoxBufferGeometry(0.5, 1.5, 0.5);
 		let material = new THREE.MeshPhongMaterial( {color: 0x00aa33} );
 		this.visual = new THREE.Mesh( geometry, material );
+		this.visual.position.set(1,2,0);
 		scene.add( this.visual );
 	}
 
@@ -114,6 +118,19 @@ class Runner {
 
 	unPause() {
 		this.gameState = this.GameStateEnum.sRunning;
+	}
+
+	get position() {
+		return this.visual.position;
+	}
+
+	get speed() {
+		return 1;
+	}
+
+	get sightLimit() {
+		//return this.visual.position.z + this.sightDistance;
+		return this.sightDistance;
 	}
 
 }
@@ -162,6 +179,15 @@ class TrackGenerator {
 	static TrackXPosEnum = Object.freeze({tLeft:0, tCentre:1, tRight:2, tDoubleLeft:3, tDoubleRight:4});
 	static TrackZPosEnum = Object.freeze({tStart:0, tGoOn:1, tEnd:2});
 	static #trackPosHash(XPos, ZPos) { return XPos * Object.keys(TrackGenerator.TrackZPosEnum).length + ZPos; }
+
+	// Game Constants
+	distBetweenRoads = 1.3;
+	horizon = 0.5;
+	trackSegmentLength = 16;
+	startDifficultyLevel = 30;
+	endDifficultyLevel = 8;
+	timeToChangeDifficulty = 300;
+	timeBetweenGoldLines = 2;
 
 	constructor(assetkit, player) {
 		this.player = player;
@@ -285,6 +311,9 @@ class TrackGenerator {
 			this.#generateCoins();
 			this.#generatePowerups();
 			this.#generateEnvironment();
+
+			this.#scrollTrack();
+			this.#destroyOffscreenTrack();
 		}
 	}
 
@@ -294,51 +323,63 @@ class TrackGenerator {
 		
 		if (this.trackObjects.length == 0) {
 			randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
-		} else {
-			const predecessor = this.trackObjects.pop();
+			console.log(randomPrefab.name);
 
-			if (predecessor.userData.trackType === TrackGenerator.TrackTypeEnum.tBridge) {
-				if (this.specialSegmentSequenceLen > 0) {
-					this.specialSegmentSequenceLen -= 1;
-					randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tGoOn)].clone();
-				} else if (this.specialSegmentSequenceLen == 0) {
-					this.specialSegmentSequenceLen -= 1;
-					randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tEnd)].clone();
-				} else {
-					// Get a regular road
-					randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+			this.trackObjects.push(randomPrefab);
+			scene.add(randomPrefab);
+		} else {
+			//const predecessor = this.trackObjects.pop();
+			let predecessor = this.trackObjects[this.trackObjects.length - 1];
+
+			while (predecessor.position.z + (this.trackSegmentLength / 2) < this.player.sightLimit) {
+				if (predecessor.userData.trackType === TrackGenerator.TrackTypeEnum.tBridge) {
+					// if bridge: can continue bridge, end bridge, or get the next road after the bridge
+					if (this.specialSegmentSequenceLen > 0) {
+						this.specialSegmentSequenceLen -= 1;
+						randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tGoOn)].clone();
+					} else if (this.specialSegmentSequenceLen == 0) {
+						this.specialSegmentSequenceLen -= 1;
+						randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tEnd)].clone();
+					} else {
+						// Get a regular road
+						randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+					}
+				} else if (predecessor.userData.trackType === TrackGenerator.TrackTypeEnum.tPit) {
+					// if pit: can continue pit, end pit, or get next road after pit
+					if (this.specialSegmentSequenceLen > 0) {
+						this.specialSegmentSequenceLen -= 1;
+						randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tGoOn)].clone();
+					} else if (this.specialSegmentSequenceLen == 0) {
+						this.specialSegmentSequenceLen -= 1;
+						randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tEnd)].clone();
+					} else {
+						randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+					}
+				} else { // Regular Road: can select bridge, pit, or road as the next one.
+					const val = Math.random();
+					if (val < 0.03) { // 30% of one tenth: Select bridge
+						this.specialSegmentSequenceLen = Math.floor(Math.random() * 3);
+						randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(Math.floor(Math.random() * 3), TrackGenerator.TrackZPosEnum.tStart)].clone();
+					} else if (val < 0.1) { // 70% of one tenth: Select pit
+						this.specialSegmentSequenceLen = Math.floor(Math.random() * 5);
+						randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(Math.floor(Math.random() * 5), TrackGenerator.TrackZPosEnum.tStart)].clone();
+					} else {
+						randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
+					}
 				}
-			} else if (predecessor.userData.trackType === TrackGenerator.TrackTypeEnum.tPit) {
-				if (this.specialSegmentSequenceLen > 0) {
-					this.specialSegmentSequenceLen -= 1;
-					randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tGoOn)].clone();
-				} else if (this.specialSegmentSequenceLen == 0) {
-					this.specialSegmentSequenceLen -= 1;
-					randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(predecessor.userData.trackXPos, TrackGenerator.TrackZPosEnum.tEnd)].clone();
-				} else {
-					randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
-				}
-			} else { // Regular Road
-				const val = Math.random();
-				if (val < 0.03) { // 30% of one tenth: Select bridge
-					this.specialSegmentSequenceLen = Math.floor(Math.random() * 3);
-					randomPrefab = this.bridgeSegmentPrefabs[TrackGenerator.#trackPosHash(Math.floor(Math.random() * 3), TrackGenerator.TrackZPosEnum.tStart)].clone();
-				} else if (val < 0.1) { // 70% of one tenth: Select pit
-					this.specialSegmentSequenceLen = Math.floor(Math.random() * 5);
-					randomPrefab = this.pitSegmentPrefabs[TrackGenerator.#trackPosHash(Math.floor(Math.random() * 5), TrackGenerator.TrackZPosEnum.tStart)].clone();
-				} else {
-					randomPrefab = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
-				}
+
+				console.log(randomPrefab.name);
+				randomPrefab.position.z = predecessor.position.z + this.trackSegmentLength;
+
+				this.trackObjects.push(randomPrefab);
+				scene.add(randomPrefab);
+
+				predecessor = this.trackObjects[this.trackObjects.length - 1];
 			}
 
-			scene.remove(predecessor);
-			threejsDispose(predecessor);
+			//scene.remove(predecessor);
+			//threejsDispose(predecessor);
 		}
-
-		console.log(randomPrefab.name);
-
-		this.trackObjects.push(randomPrefab);
-		scene.add(randomPrefab);
 
 	 }
 
@@ -356,6 +397,24 @@ class TrackGenerator {
 
 	 #generatePowerups() {
 
+	 }
+
+	 #scrollTrack() {
+		const deltaZ = this.player.speed;// * deltaTime * 30;
+		this.trackObjects.forEach((trackObject) => {
+			trackObject.position.z -= deltaZ; 
+		});
+	 }
+
+	 #destroyOffscreenTrack() {
+		if (this.trackObjects.length > 0) {
+			const offscreenCutoff = this.player.position.z - this.trackSegmentLength;
+			while (this.trackObjects[0].position.z < offscreenCutoff) {
+				const trackToDestroy = this.trackObjects.shift();
+				scene.remove(trackToDestroy);
+				threejsDispose(trackToDestroy);
+			}
+		}
 	 }
 }
 
