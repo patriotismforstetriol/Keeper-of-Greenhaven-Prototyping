@@ -61,13 +61,19 @@ class Runner {
 
 	// Scoring values
 	scoreMultiplier;
+	timer;
+
+	// Score constants
+	startDifficulty = 10; // 30; // 30 based on old game constants
+	endDifficulty = 8;
+	timeToChangeDifficulty = 300;
 
 
 	// Player
 	visual; // mesh
 
 	// Player Constants
-	sightDistance = 20;
+	sightDistance = 40; //20; // 20 based on old game constants
 
 	constructor() {
 		// AWAKEN
@@ -78,6 +84,7 @@ class Runner {
 
 		// INITIALISE
 		// TODO: make TrackGenerator
+		this.timer = 0; // TODO update this timer each time.
 
 		//this.gameState = this.GameStateEnum.sRunning;
 	}
@@ -125,7 +132,12 @@ class Runner {
 	}
 
 	get speed() {
-		return 1;
+		return 1; //@
+	}
+
+	get difficulty() {
+		// LERPs the current difficulty
+		return this.startDifficulty + (this.endDifficulty - this.startDifficulty) * this.timer / this.timeToChangeDifficulty;
 	}
 
 	get sightLimit() {
@@ -148,6 +160,8 @@ function threejsDispose(obj) {
 		threejsDispose(child);
 	});
 } 
+
+
 
 class TrackGenerator {
 	player;
@@ -172,27 +186,32 @@ class TrackGenerator {
 	// Queues
 	environmentQueue;
 	specialSegmentSequenceLen;
+	gapsAfterLastObstacle;
 
 	// Game Track Constants
 	static TrackTypeEnum = Object.freeze({tRoad:0, tPit:1, tBridge:2});
 	static TrackXPosEnum = Object.freeze({tLeft:0, tCentre:1, tRight:2, tDoubleLeft:3, tDoubleRight:4});
 	static TrackZPosEnum = Object.freeze({tStart:0, tGoOn:1, tEnd:2});
 	static #trackPosHash(XPos, ZPos) { return XPos * Object.keys(TrackGenerator.TrackZPosEnum).length + ZPos; }
+	static ObstacleTypeEnum = Object.freeze({tMoveable:0, tWide:1});
+	static ItemXPosEnum = Object.freeze({tLeft:1, tCentre:0, tRight:-1});// Ony differs from TrackXPosEnum in that it is easier to convert to in-world coordinates
 
 	// Game Constants
 	distBetweenRoads = 1.3;
 	horizon = 0.5;
 	trackSegmentLength = 16;
-	startDifficultyLevel = 30;
-	endDifficultyLevel = 8;
-	timeToChangeDifficulty = 300;
 	timeBetweenGoldLines = 2;
+	worldUp = new THREE.Vector3(0,1,0);
 
 	constructor(assetkit, player) {
 		this.player = player;
 
 		this.roadSegmentPrefabs = assetkit.trackPrefabs.roadPrefabs.scene.children;
 		this.roadSegmentPrefabs.forEach((pf) => { pf.userData.trackType = TrackGenerator.TrackTypeEnum.tRoad; });
+		this.roadSegmentPrefabs.forEach((pf) => { pf.userData.itemPositions = [ TrackGenerator.ItemXPosEnum.tLeft
+																			  , TrackGenerator.ItemXPosEnum.tCentre
+																			  , TrackGenerator.ItemXPosEnum.tRight]; 
+												});
 
 		// Assumes there's only one version of each trackPosHash
 		const pitSegs = assetkit.trackPrefabs.pitPrefabs.scene.children;
@@ -201,21 +220,31 @@ class TrackGenerator {
 		pitSegs.forEach((pf) => { pf.userData.trackType = TrackGenerator.TrackTypeEnum.tPit; });
 		pitSegs.forEach((pf) => {
 			let xPos;
+			let items = [];
 			if (pf.name.search("_SINGLE_CENTER") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tCentre;
+				items.push(TrackGenerator.ItemXPosEnum.tLeft);
+				items.push(TrackGenerator.ItemXPosEnum.tRight);
 			} else if (pf.name.search("_SINGLE_RIGHT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tRight;
+				items.push(TrackGenerator.ItemXPosEnum.tLeft);
+				items.push(TrackGenerator.ItemXPosEnum.tCentre);
 			} else if (pf.name.search("_SINGLE_LEFT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tLeft;
+				items.push(TrackGenerator.ItemXPosEnum.tCentre);
+				items.push(TrackGenerator.ItemXPosEnum.tRight);
 			} else if (pf.name.search("_DOUBLE_RIGHT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tDoubleRight;
+				items.push(TrackGenerator.ItemXPosEnum.tLeft);
 			} else if (pf.name.search("_DOUBLE_LEFT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tDoubleLeft;
+				items.push(TrackGenerator.ItemXPosEnum.tRight);
 			} else {
 				console.log("Failed to categorise x position of " + pf.name);
 				return;
 			}
 			pf.userData.trackXPos = xPos;
+			pf.userData.itemPositions = items; 
 
 			let zPos;
 			if (pf.name.search("_START") >= 0) {
@@ -240,21 +269,30 @@ class TrackGenerator {
 		bridgeSegs.forEach((pf) => { pf.userData.trackType = TrackGenerator.TrackTypeEnum.tBridge; });
 		bridgeSegs.forEach((pf) => {
 			let xPos;
+			let items = [];
 			if (pf.name.search("_CENTER") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tCentre;
+				items.push(TrackGenerator.ItemXPosEnum.tCentre);
 			} else if (pf.name.search("_RIGHT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tRight;
+				items.push(TrackGenerator.ItemXPosEnum.tRight);
 			} else if (pf.name.search("_LEFT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tLeft;
+				items.push(TrackGenerator.ItemXPosEnum.tLeft);
 			} else if (pf.name.search("_DOUBLE_RIGHT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tDoubleRight;
+				items.push(TrackGenerator.ItemXPosEnum.tRight);
+				items.push(TrackGenerator.ItemXPosEnum.tCentre);
 			} else if (pf.name.search("_DOUBLE_LEFT") >= 0) {
 				xPos = TrackGenerator.TrackXPosEnum.tDoubleLeft;
+				items.push(TrackGenerator.ItemXPosEnum.tCentre);
+				items.push(TrackGenerator.ItemXPosEnum.tLeft);
 			} else {
 				console.log("Failed to categorise x position of " + pf.name);
 				return;
 			}
 			pf.userData.trackXPos = xPos;
+			pf.userData.itemPositions = items;
 
 			let zPos;
 			if (pf.name.search("_START") >= 0) {
@@ -288,6 +326,13 @@ class TrackGenerator {
 								];
 		this.backgroundPrefabs = assetkit.bgPrefabs.scene.children;
 		this.obstaclePrefabs = assetkit.obstPrefabs.scene.children;
+		this.obstaclePrefabs.forEach((pf) => { 
+			if (pf.name === "Ruins_Arch_01" || pf.name === "Ruins_Blocks_02" || pf.name === "Thorn07") {
+				pf.userData.obstacleType = TrackGenerator.ObstacleTypeEnum.tWide;
+			} else {
+				pf.userData.obstacleType = TrackGenerator.ObstacleTypeEnum.tMoveable;
+			}
+		});
 
 		this.coinPrefab = assetkit.bonusPrefabs.scene.children[0];
 		this.powerupPrefabs = assetkit.bonusPrefabs.scene.children.filter(obj => obj != "Coin");
@@ -300,14 +345,17 @@ class TrackGenerator {
 
 		this.environmentQueue = [];
 		this.specialSegmentSequenceLen = -1;
+		this.gapsAfterLastObstacle = 0;
 
-		console.log(this.foregroundPrefabs);
-		console.log(this.backgroundPrefabs);
+		console.log(this.obstaclePrefabs);
 	
 		// can we just immediately GenerateObstacles?
 		// or just wait for update method?
 
 		this.player.unPause();
+
+		//const arrowHelper = new THREE.ArrowHelper( new THREE.Vector3(1,0,0), new THREE.Vector3(0,3,0), 10, 0xffff00 );
+		//scene.add(arrowHelper);
 	}
 
 	update() {
@@ -329,11 +377,12 @@ class TrackGenerator {
 		
 		if (this.trackObjects.length == 0) {
 			randomTrack = this.roadSegmentPrefabs[Math.floor(Math.random() * this.roadSegmentPrefabs.length)].clone();
-			console.log(randomTrack.name);
+			//console.log(randomTrack.name);
 
 			this.trackObjects.push(randomTrack);
 			this.environmentQueue.push(randomTrack);
 			scene.add(randomTrack);
+			this.#generateTrack(); 
 		} else {
 			//const predecessor = this.trackObjects.pop();
 			let predecessor = this.trackObjects[this.trackObjects.length - 1];
@@ -421,8 +470,94 @@ class TrackGenerator {
 	 }
 
 	 #generateObstacles() {
+		// Modification to original algorithm: instead of adding just one obstacle, max,
+		// per time step, (and so having the function based on a gapLastObstacleToEnd term)
+		// we step forwards from the last obstacle until we reach the end of the track.
 
+		// but we don't want to try multiple times to generate an object in each slot. 
+		// So we track an extra gapsSetAfterLastObstacle. 
+		
+		// We can only add obstacles to the last track section on screen, to give players
+		// enough time to react. 
+		const currentDifficulty = this.player.difficulty;
+
+		let nextObstacleSlot = this.player.sightLimit - this.trackSegmentLength;
+		if (this.obstacleObjects.length > 0) {
+			const slotAfterLastObstacle = (this.obstacleObjects[this.obstacleObjects.length - 1].position.z + 
+									       this.trackSegmentLength * this.gapsAfterLastObstacle +
+									       this.player.difficulty);
+			if (slotAfterLastObstacle > nextObstacleSlot) {
+				nextObstacleSlot = slotAfterLastObstacle;
+			}
+		}
+
+		// For each slot, with some probability generate an obstacle there.
+		for (let slot = nextObstacleSlot; slot <= this.player.sightLimit; slot += currentDifficulty) {
+			if (Math.random() < 0.81) { 
+				// Find the track tile beneath us. Old game does it with a raycast.
+				const trackOfSlot = this.trackObjects.find((track) => {
+					return ((track.position.z - this.trackSegmentLength/2 <= slot) && 
+							(track.position.z + this.trackSegmentLength/2 >= slot));
+				});
+				if (trackOfSlot == undefined) {
+					return;
+				}
+				/*const arrowHelper = new THREE.ArrowHelper( new THREE.Vector3(0,-1,0), new THREE.Vector3(0,10,slot), 10, 0xffff00 );
+				scene.add(arrowHelper);*/
+
+				// If it's a bridge, don't add an obstacle.
+				if (trackOfSlot.userData.trackType == TrackGenerator.TrackTypeEnum.tBridge) {
+					this.gapsAfterLastObstacle ++;
+					continue;
+				}
+
+				// Ask the track tile where we can put the obstacle. Do this even for wide obstacles
+				// so that we can see if we're allowed to put an obstacle here or not.
+				const posForRandomObstacle = this.#getPositionForItem(trackOfSlot);
+				if (posForRandomObstacle === null) {
+					this.gapsAfterLastObstacle ++;
+					continue;
+				};
+
+				// Choose obstacle
+				const randomObstacle = this.obstaclePrefabs[ Math.floor(Math.random() * this.obstaclePrefabs.length) ].clone();
+				randomObstacle.position.z = slot;
+
+				if (randomObstacle.userData.obstacleType === TrackGenerator.ObstacleTypeEnum.tMoveable) {
+					// This x transform is dependent on Left/Centre/Right in TrackXPosEnum being 0/1/2 respectively.
+					randomObstacle.position.x = (posForRandomObstacle - 1) * this.distBetweenRoads * -1; 
+			
+					// with prop 1/2 get another obstacle, ask where we can put it, keep if hte position is different.
+					if (Math.random() < 0.5) {
+						const randomObstacle2Prefab = this.obstaclePrefabs[ Math.floor(Math.random() * this.obstaclePrefabs.length) ];
+						const posForRandomObstacle2 = this.#getPositionForItem(trackOfSlot); // assume can't be null because already one spot found
+						if (randomObstacle2Prefab.userData.obstacleType === TrackGenerator.ObstacleTypeEnum.tMoveable 
+								&& posForRandomObstacle2 != posForRandomObstacle) {
+							const randomObstacle2 = randomObstacle2Prefab.clone();
+							randomObstacle2.position.z = slot;
+							randomObstacle2.position.x = (posForRandomObstacle - 1) * this.distBetweenRoads * -1; 
+							this.obstacleObjects.push(randomObstacle2);
+							scene.add(randomObstacle2);
+						}
+					}
+				} else if (randomObstacle.name === "Ruins_Blocks_02" && trackOfSlot.userData.trackType === TrackGenerator.TrackTypeEnum.tPit) {
+					// special clause so we don't put ruin blocks hovering over a pit. We just ignore it.
+					this.gapsAfterLastObstacle ++;
+					threejsDispose(randomObstacle);
+					continue;
+				}
+			
+				// Put the obstacle down.
+				this.obstacleObjects.push(randomObstacle);
+				scene.add(randomObstacle);
+				this.gapsAfterLastObstacle = 0;
+			} else {
+				this.gapsAfterLastObstacle ++;
+			}
+		}
 	 }
+
+
 
 	 #generateCoins() {
 
@@ -439,6 +574,9 @@ class TrackGenerator {
 		});
 		this.environmentObjects.forEach((envObject) => {
 			envObject.position.z -= deltaZ; 
+		});
+		this.obstacleObjects.forEach((obstObject) => {
+			obstObject.position.z -= deltaZ; 
 		});
 	 }
 
@@ -459,9 +597,23 @@ class TrackGenerator {
 				threejsDispose(envToDestroy);
 			}
 		}
+		const offscreenCutoff = 0 - this.trackSegmentLength;
+		while (this.obstacleObjects.length > 0 && this.obstacleObjects[0].position.z < offscreenCutoff) {
+			const obstToDestroy = this.obstacleObjects.shift();
+			scene.remove(obstToDestroy);
+			threejsDispose(obstToDestroy);
+		}
 		
 	 }
+
+	 #getPositionForItem(onThisTrack) {
+		if (onThisTrack.userData.itemPositions.length < 1) {
+			return null;
+		}
+		return onThisTrack.userData.itemPositions[ Math.floor(Math.random() * onThisTrack.userData.itemPositions.length) ];
+	 }
 }
+
 
 let myTrackGenerator = undefined;
 
