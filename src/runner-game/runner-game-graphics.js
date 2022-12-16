@@ -103,7 +103,7 @@ class Runner {
 		//move( deltaTime ); // TODO
 		//stayOnTheGround(); //TODO
 		//getInput(); //TODO
-		this.timer += 0.1;
+		this.timer += 0.02;
 		//checkMultiplier();
 	}
 
@@ -187,6 +187,7 @@ class TrackGenerator {
 	specialSegmentSequenceLen;
 	gapsAfterLastObstacle;
 	timeToCoinLine;
+	timeToGeneratePowerup;
 
 	// Game Track Constants
 	static TrackTypeEnum = Object.freeze({tRoad:0, tPit:1, tBridge:2});
@@ -349,6 +350,7 @@ class TrackGenerator {
 		this.specialSegmentSequenceLen = -1;
 		this.gapsAfterLastObstacle = 0;
 		this.timeToCoinLine = 0.5; // must be greater than 0 at beginning so initial obstacles have a chance to generate.
+		this.timeToGeneratePowerup = 2;
 
 		console.log(this.obstaclePrefabs);
 	
@@ -564,7 +566,6 @@ class TrackGenerator {
 
 	 #generateCoins() {
 		// if not yet time to generate coins, return
-		console.log(this.player.timer);
 		if (this.player.timer < this.timeToCoinLine) {
 			return;
 		}
@@ -648,6 +649,52 @@ class TrackGenerator {
 	 }
 
 	 #generatePowerups() {
+		// Very similar to generateCoins
+		if (this.player.timer < this.timeToGeneratePowerup) {
+			return;
+		}
+
+		// Find the point halfway between player and sightLimit, and the track under that point
+		let zCoord = this.player.sightLimit / 2;
+		let track = this.trackObjects.find((track) => {
+			return ((track.position.z - this.trackSegmentLength/2 <= zCoord) && 
+					(track.position.z + this.trackSegmentLength/2 >= zCoord));
+		});
+		if (track == undefined) {
+			return;
+		}
+		const line = this.#getPositionForItem(track);
+
+		const powerup = this.powerupPrefabs[Math.floor(Math.random() * this.powerupPrefabs.length)].clone();
+		powerup.position.x = line * this.distBetweenRoads;
+		powerup.position.z = zCoord;
+
+		// If there are any obstacles below us (on our line and at our halfway point)
+		// or any obstacles 4 units in front or behind us, put the coin at a height of 1.5
+		const highOrigin = new THREE.Vector3(line * this.distBetweenRoads, 0.7, zCoord);
+		const downVec = new THREE.Vector3(0,-1,0);
+		const raycastDown = new THREE.Raycaster(highOrigin, downVec, 0, 1);
+		const lowOrigin = new THREE.Vector3(line * this.distBetweenRoads, 0.5, zCoord);
+		const forwardVec = new THREE.Vector3(0, 0, 1);
+		const backwardVec = forwardVec.clone().negate();
+		const raycastForwards = new THREE.Raycaster(lowOrigin, forwardVec, 0, this.distBetweenCoins);
+		const raycastBackwards = new THREE.Raycaster(lowOrigin, backwardVec, 0, this.distBetweenCoins);
+
+		const intersections = [ raycastDown.intersectObjects(this.obstacleObjects)
+								, raycastForwards.intersectObjects(this.obstacleObjects)
+								, raycastBackwards.intersectObjects(this.obstacleObjects)].flat();
+
+		if (intersections.length > 0) {
+			powerup.position.y = 1.5;
+		} else {
+			// Otherwise put the coin at a height of 0.5
+			powerup.position.y = 0.5;
+		}
+						
+		scene.add(powerup);
+		this.powerupObjects.push(powerup);
+		
+		this.timeToGeneratePowerup = this.player.timer + 15 + Math.floor(Math.random() * 5);
 
 	 }
 
@@ -664,6 +711,9 @@ class TrackGenerator {
 		});
 		this.coinObjects.forEach((coinObject) => {
 			coinObject.position.z -= deltaZ; 
+		});
+		this.powerupObjects.forEach((powerupObject) => {
+			powerupObject.position.z -= deltaZ; 
 		});
 	 }
 
@@ -694,6 +744,11 @@ class TrackGenerator {
 			const coinToDestroy = this.coinObjects.shift();
 			scene.remove(coinToDestroy);
 			threejsDispose(coinToDestroy);
+		}
+		while (this.powerupObjects.length > 0 && this.powerupObjects[0].position.z < offscreenCutoff) {
+			const powerupToDestroy = this.powerupObjects.shift();
+			scene.remove(powerupToDestroy);
+			threejsDispose(powerupToDestroy);
 		}
 		
 	 }
