@@ -57,14 +57,13 @@ scene.add(bcube);*/
 class Runner {
 	GameStateEnum = Object.freeze({sLoading:0, sRunning:1, sPaused:2, sPlayerDead:3});
 	gameState;
-	timer;
 
 	// Scoring values
 	scoreMultiplier;
 	timer;
 
 	// Score constants
-	startDifficulty = 10; // 30; // 30 based on old game constants
+	startDifficulty = 30; // 30 based on old game constants
 	endDifficulty = 8;
 	timeToChangeDifficulty = 300;
 
@@ -98,14 +97,14 @@ class Runner {
 	}
 
 	update( deltaTime ) {
-		if ( gameState != this.GameStateEnum.sRunning ) {
-			return;
-		}
-		move( deltaTime ); // TODO
-		stayOnTheGround(); //TODO
-		getInput(); //TODO
-		this.timer += deltaTime;
-		checkMultiplier();
+		//if ( gameState != this.GameStateEnum.sRunning ) {
+		//	return;
+		//}
+		//move( deltaTime ); // TODO
+		//stayOnTheGround(); //TODO
+		//getInput(); //TODO
+		this.timer += 0.1;
+		//checkMultiplier();
 	}
 
 	move() {
@@ -187,6 +186,7 @@ class TrackGenerator {
 	environmentQueue;
 	specialSegmentSequenceLen;
 	gapsAfterLastObstacle;
+	timeToCoinLine;
 
 	// Game Track Constants
 	static TrackTypeEnum = Object.freeze({tRoad:0, tPit:1, tBridge:2});
@@ -200,7 +200,9 @@ class TrackGenerator {
 	distBetweenRoads = 1.3;
 	horizon = 0.5;
 	trackSegmentLength = 16;
-	timeBetweenGoldLines = 2;
+	numCoinsInLine = 5;
+	distBetweenCoins = 4;
+	timeBetweenCoinLines = 2;
 	worldUp = new THREE.Vector3(0,1,0);
 
 	constructor(assetkit, player) {
@@ -346,6 +348,7 @@ class TrackGenerator {
 		this.environmentQueue = [];
 		this.specialSegmentSequenceLen = -1;
 		this.gapsAfterLastObstacle = 0;
+		this.timeToCoinLine = 0.5; // must be greater than 0 at beginning so initial obstacles have a chance to generate.
 
 		console.log(this.obstaclePrefabs);
 	
@@ -360,6 +363,8 @@ class TrackGenerator {
 
 	update() {
 		if (!this.player.isPaused()) {
+			this.player.update();
+
 			this.#generateTrack();
 			this.#generateObstacles();
 			this.#generateCoins();
@@ -525,7 +530,7 @@ class TrackGenerator {
 
 				if (randomObstacle.userData.obstacleType === TrackGenerator.ObstacleTypeEnum.tMoveable) {
 					// This x transform is dependent on Left/Centre/Right in TrackXPosEnum being 0/1/2 respectively.
-					randomObstacle.position.x = (posForRandomObstacle - 1) * this.distBetweenRoads * -1; 
+					randomObstacle.position.x = posForRandomObstacle * this.distBetweenRoads; 
 			
 					// with prop 1/2 get another obstacle, ask where we can put it, keep if hte position is different.
 					if (Math.random() < 0.5) {
@@ -535,7 +540,7 @@ class TrackGenerator {
 								&& posForRandomObstacle2 != posForRandomObstacle) {
 							const randomObstacle2 = randomObstacle2Prefab.clone();
 							randomObstacle2.position.z = slot;
-							randomObstacle2.position.x = (posForRandomObstacle - 1) * this.distBetweenRoads * -1; 
+							randomObstacle2.position.x = posForRandomObstacle * this.distBetweenRoads; 
 							this.obstacleObjects.push(randomObstacle2);
 							scene.add(randomObstacle2);
 						}
@@ -557,9 +562,88 @@ class TrackGenerator {
 		}
 	 }
 
-
-
 	 #generateCoins() {
+		// if not yet time to generate coins, return
+		console.log(this.player.timer);
+		if (this.player.timer < this.timeToCoinLine) {
+			return;
+		}
+
+		// Find the point halfway between player and sightLimit, and the track under that point
+		let zCoord = this.player.sightLimit / 2;
+		let track = this.trackObjects.find((track) => {
+			return ((track.position.z - this.trackSegmentLength/2 <= zCoord) && 
+					(track.position.z + this.trackSegmentLength/2 >= zCoord));
+		});
+		if (track == undefined) {
+			return;
+		}
+		let line = undefined;
+		
+		for (let i = 0; i < this.numCoinsInLine; ++i) {
+			// Update the track segmetn if we move onto the next one. Old game uses a raycast
+			if (track.position.z + this.trackSegmentLength/2 < zCoord) {
+				track = this.trackObjects.find((track) => {
+					return ((track.position.z - this.trackSegmentLength/2 <= zCoord) && 
+							(track.position.z + this.trackSegmentLength/2 >= zCoord));
+				});
+				if (track == undefined) {
+					return;
+				}
+
+				// We are now on a different track segment to the first,
+				// check if that line is still possible. If not, get a new position for coin line
+				if (!(track.userData.itemPositions.includes(line))) {
+					line = this.#getPositionForItem(track);
+				}
+			}
+
+			// If the have-started flag is not set, get position for coin line
+			if (line === undefined) {
+				line = this.#getPositionForItem(track);
+			}
+
+			const coin = this.coinPrefab.clone();
+			coin.position.x = line * this.distBetweenRoads;
+			coin.position.z = zCoord;
+
+			// If there are any obstacles below us (on our line and at our halfway point)
+			// or any obstacles 4 units in front or behind us, put the coin at a height of 1.5
+			const highOrigin = new THREE.Vector3(line * this.distBetweenRoads, 0.7, zCoord);
+			const downVec = new THREE.Vector3(0,-1,0);
+			const raycastDown = new THREE.Raycaster(highOrigin, downVec, 0, 1);
+			const lowOrigin = new THREE.Vector3(line * this.distBetweenRoads, 0.5, zCoord);
+			const forwardVec = new THREE.Vector3(0, 0, 1);
+			const backwardVec = forwardVec.clone().negate();
+			const raycastForwards = new THREE.Raycaster(lowOrigin, forwardVec, 0, this.distBetweenCoins);
+			const raycastBackwards = new THREE.Raycaster(lowOrigin, backwardVec, 0, this.distBetweenCoins);
+
+			const intersections = [ raycastDown.intersectObjects(this.obstacleObjects)
+								  , raycastForwards.intersectObjects(this.obstacleObjects)
+								  , raycastBackwards.intersectObjects(this.obstacleObjects)].flat();
+			/*console.log(zCoord, intersections);
+			if (i == 0) {
+				const arrowHelper = new THREE.ArrowHelper( downVec, highOrigin, 1, 0xffff00 );
+				const arrowHelper2 = new THREE.ArrowHelper( forwardVec, lowOrigin, this.distBetweenCoins, 0xffff00 );
+				const arrowHelper3 = new THREE.ArrowHelper( backwardVec, lowOrigin, this.distBetweenCoins, 0xffff00 );
+				scene.add(arrowHelper);
+				scene.add(arrowHelper2);
+				scene.add(arrowHelper3);
+			}*/
+			if (intersections.length > 0) {
+				coin.position.y = 1.5;
+			} else {
+				// Otherwise put the coin at a height of 0.5
+				coin.position.y = 0.5;
+			}
+							
+			scene.add(coin);
+			this.coinObjects.push(coin);
+
+			zCoord += this.distBetweenCoins;
+		}
+		
+		this.timeToCoinLine = this.player.timer + this.timeBetweenCoinLines;
 
 	 }
 
@@ -577,6 +661,9 @@ class TrackGenerator {
 		});
 		this.obstacleObjects.forEach((obstObject) => {
 			obstObject.position.z -= deltaZ; 
+		});
+		this.coinObjects.forEach((coinObject) => {
+			coinObject.position.z -= deltaZ; 
 		});
 	 }
 
@@ -602,6 +689,11 @@ class TrackGenerator {
 			const obstToDestroy = this.obstacleObjects.shift();
 			scene.remove(obstToDestroy);
 			threejsDispose(obstToDestroy);
+		}
+		while (this.coinObjects.length > 0 && this.coinObjects[0].position.z < offscreenCutoff) {
+			const coinToDestroy = this.coinObjects.shift();
+			scene.remove(coinToDestroy);
+			threejsDispose(coinToDestroy);
 		}
 		
 	 }
